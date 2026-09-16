@@ -4,10 +4,9 @@ API REST en **Node.js + Express 5** con base de datos **PostgreSQL 17**. Guarda 
 todo lo que hoy la interfaz guarda en `localStorage`: usuarios, permisos, portafolios, proyectos
 con sus 40 procesos, documentos, archivos, riesgos, trabajo ágil, valor ganado y la capa EOS.
 
-> **Estado:** el backend y la base de datos están completos y probados (91 pruebas de aceptación).
-> La interfaz (`assets/js/gestor.js`) **todavía lee y escribe en el navegador**; conectarla a esta
-> API es la siguiente fase. Mientras tanto, el servidor ya sirve la interfaz en
-> `http://localhost:3000` y permite importar lo guardado en el navegador.
+> **Estado:** API, base de datos e interfaz conectadas y probadas: 97 pruebas de aceptación de la
+> API y 10 pruebas en navegador (Edge). Servida desde `http://localhost:3000`, la interfaz trabaja
+> contra esta API; abierta con doble clic sobre `index.html`, sigue en modo local como siempre.
 
 ---
 
@@ -19,7 +18,8 @@ con sus 40 procesos, documentos, archivos, riesgos, trabajo ágil, valor ganado 
 |---|---|---|
 | PostgreSQL 17.6 | `C:\Users\lucio\pgsql` | Binarios oficiales (sin instalador: no hacían falta permisos de administrador) |
 | Datos del clúster | `C:\Users\lucio\pgsql\data` | Fuera de OneDrive a propósito: la sincronización corrompe una base viva |
-| Superusuario | `postgres` / `Lucio 12345` | Solo escucha en `localhost:5432` |
+| Superusuario | `postgres` / `Lucio 12345` | Solo lo usa el migrador (`PGADMIN_*`). Solo escucha en `localhost:5432` |
+| Cuenta de la API | `pmbok8_app` | Sin privilegios de administración: solo lee y escribe datos. Su contraseña aleatoria está en `.env` |
 | Arranque automático | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\PostgreSQL-PMBOK8.vbs` | Inicia PostgreSQL al iniciar sesión. Borra el archivo para desactivarlo |
 | Bases | `pmbok8` (trabajo) y `pmbok8_test` (pruebas) | UTF-8, ordenación ICU `es-CO`, zona `America/Bogota` |
 
@@ -27,7 +27,7 @@ con sus 40 procesos, documentos, archivos, riesgos, trabajo ágil, valor ganado 
 
 Doble clic en **`backend\iniciar.cmd`**: arranca PostgreSQL si hace falta, instala dependencias
 la primera vez y levanta la API. Después abre **http://localhost:3000** y entra con
-`admin@pmbok.local` · `admin123`.
+`admin@pmbok.local` · `admin123`; la primera vez se pide elegir una contraseña propia.
 
 Desde una consola en `backend\`:
 
@@ -35,7 +35,8 @@ Desde una consola en `backend\`:
 npm run bd:iniciar      :: arranca PostgreSQL        (bd:detener, bd:estado)
 npm start               :: levanta la API en el puerto 3000
 npm run dev             :: igual, reiniciando al cambiar el código
-npm test                :: batería de aceptación (usa pmbok8_test, nunca pmbok8)
+npm test                :: batería de aceptación de la API (usa pmbok8_test, nunca pmbok8)
+npm run test:e2e        :: pruebas en navegador con Edge (API propia en :3100, base pmbok8_e2e)
 npm run db:migrar       :: aplica migraciones pendientes
 npm run db:reiniciar    :: BORRA pmbok8 y la crea de cero con el administrador
 ```
@@ -47,7 +48,8 @@ catálogo y garantiza que exista un administrador. Solo escucha en el propio equ
 ### En otro equipo
 
 1. Instala Node.js 20 o superior y PostgreSQL 15 o superior.
-2. Copia `.env.example` a `.env` y rellena `PGPASSWORD` y `JWT_SECRETO`.
+2. Copia `.env.example` a `.env` y rellena `PGADMIN_PASSWORD` (el superusuario), una contraseña
+   larga para `PGPASSWORD` (la cuenta `pmbok8_app`, que el migrador crea) y `JWT_SECRETO`.
 3. `npm install` y `npm start`.
 
 ### Configuración (`backend/.env`)
@@ -56,7 +58,9 @@ catálogo y garantiza que exista un administrador. Solo escucha en el propio equ
 |---|---|---|
 | `PORT` | `3000` | Puerto HTTP |
 | `HOST` | `127.0.0.1` y `::1` | Dirección de escucha; ponla solo si necesitas otra |
-| `PGHOST` `PGPORT` `PGUSER` `PGPASSWORD` `PGDATABASE` | `localhost` `5432` `postgres` — `pmbok8` | Conexión. La contraseña con espacios va entre comillas |
+| `PGHOST` `PGPORT` `PGDATABASE` | `localhost` `5432` `pmbok8` | Servidor y base |
+| `PGUSER` `PGPASSWORD` | `pmbok8_app` | Cuenta con la que trabaja la API (permisos mínimos) |
+| `PGADMIN_USER` `PGADMIN_PASSWORD` | `postgres` | Cuenta que crea la base y el rol y aplica migraciones. Una contraseña con espacios va entre comillas |
 | `JWT_SECRETO` | aleatorio en cada arranque | Firma de los tokens. Sin él, las sesiones caducan al reiniciar |
 | `JWT_EXPIRA_HORAS` | `12` | Duración de una sesión |
 | `ADMIN_CORREO` `ADMIN_CLAVE` | `admin@pmbok.local` `admin123` | Cuenta inicial, solo si no hay ningún administrador |
@@ -84,11 +88,13 @@ backend/
     repositorio.js            CRUD genérico camelCase ⇄ snake_case
     errores.js · validacion.js
     middleware/auth.js        Sesión, roles y nivel por proyecto
-    servicios/                sesiones · proyectos · trabajo · documentos · datos
+    servicios/                sesiones · estado · proyectos · trabajo · documentos · datos
     rutas/                    auth · usuarios · proyectos · organizacion · recursos
   tests/
     ayuda.js                  Base aislada + servidor real en puerto libre
-    aceptacion/*.test.js      10 historias de usuario, 91 criterios
+    aceptacion/*.test.js      11 historias de usuario, 97 criterios (API)
+    e2e/*.spec.js             Pruebas en navegador (Playwright + Edge)
+  playwright.config.js        Arranca su propia API en :3100 con la base pmbok8_e2e
 ```
 
 El backend **no duplica el contenido de la guía**: metodologías, flujo de los 40 procesos y
@@ -139,8 +145,13 @@ edita; los permisos por portafolio, programa o proyecto se suman y **gana el má
 | Usuarios, permisos, exportar, importar y reiniciar | rol `admin` |
 
 Las reglas de crear proyectos y de editar la estructura siguen la descripción de los roles de la
-aplicación («el director crea y dirige proyectos», «el ejecutor no edita planes»). La interfaz
-actual todavía no las aplica: lo hará al conectarse a la API.
+aplicación («el director crea y dirige proyectos», «el ejecutor no edita planes»). La interfaz las
+aplica también: oculta lo que el rol no puede hacer y muestra la gerencia EOS en solo lectura.
+
+**Contraseñas que otra persona conoce.** La cuenta inicial, las que crea o restablece un
+administrador y las importadas con la provisional quedan marcadas (`debeCambiarClave`). Mientras lo
+estén, la API responde `403 CLAVE_PENDIENTE` a todo salvo `GET /api/auth/yo`, `PUT /api/auth/clave`
+y `POST /api/auth/salir`, y la interfaz pide elegir una contraseña nueva, distinta de la actual.
 
 ---
 
@@ -158,7 +169,7 @@ con 400 (datos no válidos), 401 (sin sesión), 403 (sin permiso), 404, 409 (con
 
 | Método y ruta | Descripción |
 |---|---|
-| `GET /api/salud` | Estado de la base y del catálogo |
+| `GET /api/salud` | Estado de la base y del catálogo; `primerUso` indica que solo existe la cuenta inicial sin estrenar |
 | `GET /api/catalogo/metodologias` · `bandas` · `procesos` · `artefactos` · `artefactos/:id` | Contenido de la guía |
 | `POST /api/auth/entrar` | `{ correo, clave }` → `{ token, expira, usuario }` |
 
@@ -166,10 +177,11 @@ con 400 (datos no válidos), 401 (sin sesión), 403 (sin permiso), 404, 409 (con
 
 | Método y ruta | Descripción |
 |---|---|
-| `POST /api/auth/salir` · `GET /api/auth/yo` · `PUT /api/auth/clave` | Cerrar sesión, perfil, cambiar la propia contraseña (`{ actual, nueva }`) |
+| `POST /api/auth/salir` · `GET /api/auth/yo` · `PUT /api/auth/clave` | Cerrar sesión, perfil, cambiar la propia contraseña (`{ actual, nueva }`, nueva distinta) |
+| `GET /api/estado` | Todo lo que el usuario puede ver, con la forma de la base del navegador y el `nivel` de cada proyecto. La interfaz lo carga al entrar |
 | `GET /api/usuarios` · `GET /api/usuarios/roles` · `GET /api/usuarios/:id` | Listar (sin contraseñas) |
-| `POST /api/usuarios` · `PATCH /api/usuarios/:id` · `PUT /api/usuarios/:id/clave` · `DELETE /api/usuarios/:id` | Solo admin. Siempre queda un admin activo |
-| `GET /api/permisos?usuarioId=` · `POST /api/permisos` · `DELETE /api/permisos/:id` | Conceder (`{ usuarioId, ambito, refId, nivel }`, cambia el nivel si ya existía) y revocar |
+| `POST /api/usuarios` · `PATCH /api/usuarios/:id` · `PUT /api/usuarios/:id/clave` · `DELETE /api/usuarios/:id` | Solo admin. Siempre queda un admin activo. Crear o restablecer marca `debeCambiarClave` |
+| `GET /api/permisos?usuarioId=` · `POST /api/permisos` · `DELETE /api/permisos/:id` | Conceder (`{ id?, usuarioId, ambito, refId, nivel }`, cambia el nivel si ya existía) y revocar |
 | `GET /api/datos/exportar` · `POST /api/datos/importar` · `POST /api/datos/reiniciar` | Formato `pmbok8-gestor`; reiniciar exige `{ "confirmacion": "ELIMINAR" }` |
 
 ### Proyectos
@@ -177,18 +189,18 @@ con 400 (datos no válidos), 401 (sin sesión), 403 (sin permiso), 404, 409 (con
 | Método y ruta | Descripción |
 |---|---|
 | `GET /api/panel` · `GET /api/calendario` | Cifras y siguiente paso; agenda de todos los proyectos visibles |
-| `GET /api/proyectos` · `POST /api/proyectos` | Visibles con nivel y avance; crear (con fases, líder y Sprint 0 si es ágil o híbrido) |
+| `GET /api/proyectos` · `POST /api/proyectos` | Visibles con nivel y avance; crear (con fases, líder y Sprint 0 si es ágil o híbrido). Mover un proyecto a otro portafolio lo saca de un programa ajeno |
 | `GET` · `PATCH` · `DELETE /api/proyectos/:id` | Detalle con avance y siguiente paso; editar; borrar en cascada |
 | `GET /api/proyectos/:id/progreso` · `siguiente` · `evm` · `salud` · `matriz-riesgos` · `calendario` · `velocidad` · `sprint-activo` | Indicadores calculados |
 | `GET /api/proyectos/:id/procesos` · `GET …/procesos/:procesoId` | Los 40 procesos con banda efectiva, estado, notas e iterativo; ficha con entradas y salidas |
 | `PUT …/procesos/:procesoId` | `{ estado?, notas? }` |
 | `PUT …/procesos/:procesoId/banda` | `{ banda }` — mover en el flujo; volver a la original borra el ajuste |
 | `GET …/procesos/:procesoId/entradas` · `salidas` | ¿Existe ya cada documento? |
-| `GET` · `POST /api/proyectos/:id/documentos` | Listar con completitud; generar `{ artefactoId, procesoId? }` (idempotente) |
+| `GET` · `POST /api/proyectos/:id/documentos` | Listar con completitud; generar `{ id?, artefactoId, procesoId? }` (idempotente) |
 | `GET` · `PATCH` · `DELETE /api/documentos/:id` | Con plantilla; `{ estado?, nombre?, contenido? }` |
 | `PUT /api/documentos/:id/bloques/:indice` | `{ valor }` — texto o tabla (`[[...], ...]`); vacío borra el bloque |
 | `POST /api/documentos/:id/versiones` | Versión + 1 y vuelta a borrador |
-| `GET` · `POST /api/proyectos/:id/archivos` | Listar; subir `multipart/form-data` (`archivo`, `categoria?`, `nombre?`) |
+| `GET` · `POST /api/proyectos/:id/archivos` | Listar; subir `multipart/form-data` (`archivo`, `categoria?`, `nombre?`, `id?`) |
 | `GET /api/archivos/:id` · `GET /api/archivos/:id/contenido[?enLinea=1]` · `DELETE /api/archivos/:id` | Metadatos, descarga (en línea solo imágenes, PDF y texto), borrar |
 
 ### Registros de un proyecto
@@ -217,11 +229,15 @@ cambio en las tareas fotografía el burndown del día automáticamente.
 | `PUT /api/metricas/:id/valores/:semana` | `{ valor }` — una celda del scorecard; vacío la borra |
 | `GET /api/vto` · `PUT /api/vto/:bloqueId` | Las respuestas del VTO; texto vacío borra el bloque |
 
+La interfaz genera los identificadores de lo que crea (proyectos, registros, documentos,
+usuarios, permisos y archivos) para poder mostrarlo sin esperar; la API los acepta si son
+válidos (`[A-Za-z0-9_.:-]`, hasta 100 caracteres) y responde 409 si ya existen.
+
 Ejemplo:
 
 ```bash
 curl -s -X POST http://localhost:3000/api/auth/entrar -H "Content-Type: application/json" \
-     -d "{\"correo\":\"admin@pmbok.local\",\"clave\":\"admin123\"}"
+     -d "{\"correo\":\"admin@pmbok.local\",\"clave\":\"<tu contraseña>\"}"
 curl -s http://localhost:3000/api/proyectos -H "Authorization: Bearer <token>"
 ```
 
@@ -229,20 +245,17 @@ curl -s http://localhost:3000/api/proyectos -H "Authorization: Bearer <token>"
 
 ## Llevar al servidor lo guardado en el navegador
 
-1. En la aplicación abierta como hasta ahora: **Administración → Exportar datos** (`pmbok8-gestor.json`).
-2. Obtén un token de administrador (`POST /api/auth/entrar`) y envía el archivo a la API
-   (hasta que la interfaz lo haga sola):
+**En el mismo navegador** donde se trabajó en modo local: entra en `http://localhost:3000` como
+administrador, abre **Administración** y pulsa **Llevar al servidor**. La aplicación importa la base
+del navegador y sube uno a uno sus archivos (conservan su identificador). Lo del navegador no se borra.
 
-   ```bash
-   curl -X POST http://localhost:3000/api/datos/importar -H "Authorization: Bearer <token>" \
-        -H "Content-Type: application/json" --data-binary @pmbok8-gestor.json
-   ```
+**Desde otro equipo:** exporta allí los datos (**Administración → Exportar datos**) e impórtalos en
+el servidor con **Importar datos**. Así no viajan los archivos, que viven en el navegador de origen.
 
 La importación **reemplaza** los datos del servidor dentro de una transacción y sanea cada registro:
 las referencias rotas se anulan o el registro se omite, y la respuesta dice cuántos se importaron
 y cuántos se omitieron. La exportación del navegador no lleva contraseñas: las cuentas que ya
-existían conservan la suya y las nuevas reciben **`cambiar123`**. El contenido de los archivos
-subidos vive en el IndexedDB del navegador y no viaja: hay que volver a subirlos.
+existían conservan la suya y las nuevas reciben **`cambiar123`**, que deben cambiar al entrar.
 
 ## Copias de seguridad
 
@@ -272,5 +285,40 @@ criterio de aceptación:
 | HU-08 Cartera y EOS | 7 | Portafolios y programas, rocas y metas, scorecard, organigrama sin ciclos, VTO, responsables eliminados |
 | HU-09 Datos | 7 | Exportación sin contraseñas, importación saneada de una exportación del navegador, ida y vuelta idéntica, reinicio |
 | HU-10 Interfaz y seguridad | 8 | Sirve la interfaz, no expone `.env` ni el código, cabeceras, CORS, catálogo, inyección SQL, cuerpos enormes |
+| HU-11 Estado y seguridad básica | 6 | Cambio obligatorio de contraseña, `/api/estado` filtrado por visibilidad, identificadores del cliente, purga de sesiones, rol sin privilegios |
 
-Última ejecución: **91 de 91 superadas** en unos 23 s.
+Última ejecución: **97 de 97 superadas** en unos 20 s. Las pruebas se ejecutan con la cuenta
+`pmbok8_app`, así que también comprueban que sus permisos bastan.
+
+### En el navegador
+
+`npm run test:e2e` usa el **Microsoft Edge instalado** (no descarga navegadores), arranca su
+propia API en el puerto 3100 con la base `pmbok8_e2e` y maneja la aplicación como una persona:
+
+| Historia | Qué comprueba |
+|---|---|
+| E2E-01 Servidor (8 pruebas) | Cambio obligatorio de contraseña; crear proyecto, completar 2.1.1 y redactar el acta, **recargar y encontrarlo todo**; tablero del sprint y burndown; riesgos, interesados y valor ganado; subir y descargar un archivo; un rechazo del servidor se avisa y se revierte; cuenta creada desde Administración que ve solo lo permitido; cerrar sesión |
+| E2E-02 Migración | Lo guardado en el navegador (base e IndexedDB) pasa al servidor con **Llevar al servidor**, archivo incluido |
+| E2E-03 Modo local | Abierta con doble clic funciona sin ninguna llamada a la API y guarda en `localStorage` |
+
+Última ejecución: **10 de 10 superadas** en unos 36 s.
+
+---
+
+## Pendiente
+
+Lo que quedó fuera de esta fase, por decisión:
+
+- **Copias automáticas** de la base: hoy son manuales (sección anterior).
+- **Acceso desde otros equipos:** el servidor solo escucha en este equipo; abrirlo a la red
+  requiere `HOST`, una regla de firewall y, en lo posible, HTTPS.
+- **PostgreSQL como servicio de Windows:** necesita permisos de administrador; hoy arranca con un
+  script al iniciar sesión.
+- **Mejoras funcionales:**
+  - el rol «ejecutor» ve todo el proyecto, no solo sus tareas;
+  - no hay control de ediciones simultáneas: gana la última;
+  - los cambios de otros usuarios no se refrescan solos: se ven al recargar;
+  - las versiones de un documento no guardan su contenido anterior;
+  - no hay recuperación de contraseña propia (la restablece un administrador);
+  - la interfaz aún no muestra los comentarios que la API ya admite.
+- **Credenciales en OneDrive:** `backend/.env` está dentro de una carpeta sincronizada.

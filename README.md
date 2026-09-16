@@ -4,13 +4,15 @@ Aplicación web local para **dirigir proyectos aplicando la Guía del PMBOK 8.ª
 mientras se aprende: los 40 procesos guiados uno a uno, los documentos que cada uno produce,
 portafolios, equipos, valor ganado y verificación de la calidad del plan.
 
-Funciona con doble clic sobre `index.html`. Sin servidor, sin instalación y sin conexión:
-todo se guarda en el navegador y nada sale del equipo.
+Funciona de dos maneras, con la misma interfaz:
 
-Además hay un **backend con PostgreSQL** en [`backend/`](backend/README.md): API REST, base de
-datos relacional, sesiones y pruebas de aceptación. La interfaz todavía no se ha conectado a él
-(es la siguiente fase); por ahora el servidor la sirve en `http://localhost:3000` y puede
-importar lo que ya esté guardado en el navegador.
+| Modo | Cómo se abre | Dónde se guarda |
+|---|---|---|
+| **Servidor** | `backend\iniciar.cmd` y después `http://localhost:3000` | PostgreSQL, con cuentas seguras y varios usuarios |
+| **Local** | Doble clic sobre `index.html` | En el navegador; sin instalación y sin conexión |
+
+La aplicación detecta sola en qué modo está: si la sirve el backend, trabaja contra su API;
+abierta desde el disco, se comporta como siempre. El backend está en [`backend/`](backend/README.md).
 
 > ### Aviso importante
 > Este software es una **herramienta educativa independiente**.
@@ -25,13 +27,17 @@ importar lo que ya esté guardado en el navegador.
 
 ## Cómo se usa
 
-Abre `index.html` en cualquier navegador moderno. La cuenta inicial es:
+**Con servidor (recomendado):** doble clic en `backend\iniciar.cmd` (arranca PostgreSQL y la API)
+y abre `http://localhost:3000`. **Sin servidor:** abre `index.html` en cualquier navegador moderno.
+La cuenta inicial es:
 
 ```
 admin@pmbok.local · admin123
 ```
 
-La pantalla de acceso la muestra y trae un botón para entrar directamente.
+La pantalla de acceso la muestra y trae un botón para entrar directamente. En modo servidor, la
+primera vez obliga a elegir una contraseña propia, igual que a cualquier cuenta creada por un
+administrador.
 
 Si prefieres servirlo en red local:
 
@@ -43,8 +49,8 @@ python -m http.server 8000
 Servirlo por HTTP habilita además el repositorio de archivos con IndexedDB, que algunos
 navegadores restringen cuando la página se abre desde el disco.
 
-Con el backend: doble clic en `backend\iniciar.cmd` (arranca PostgreSQL y la API) y abre
-`http://localhost:3000`. Detalles, API y pruebas en [`backend/README.md`](backend/README.md).
+Ese servidor de Python no incluye la API, así que la aplicación sigue en modo local.
+Detalles del backend, su API y sus pruebas en [`backend/README.md`](backend/README.md).
 
 ---
 
@@ -241,12 +247,19 @@ no protege secretos**: cualquiera con acceso al equipo puede leer el almacenamie
 Para conservar el trabajo o llevarlo a otro equipo: **Exportar datos** en Administración
 (la base completa, sin contraseñas) o **Exportar plan e informe** dentro de cada proyecto.
 
-### En el servidor (backend)
+Lo anterior describe el **modo local**.
 
-El backend guarda lo mismo en **PostgreSQL 17** (base `pmbok8`): 28 tablas con claves foráneas,
-restricciones y cascadas, contraseñas con bcrypt, sesiones revocables y los archivos dentro de la
-base. Acepta la exportación del navegador tal cual (`POST /api/datos/importar`), así que el trabajo
-hecho hasta ahora no se pierde al dar el salto. Ver [`backend/README.md`](backend/README.md).
+### En modo servidor
+
+Todo se guarda en **PostgreSQL 17** (base `pmbok8`): 28 tablas con claves foráneas, restricciones y
+cascadas, contraseñas con bcrypt, sesiones revocables y los archivos dentro de la base. Al entrar, la
+interfaz carga lo que el usuario puede ver; cada cambio se ve al instante y se envía al servidor en
+orden (en la cabecera aparece «Guardando…»). Si el servidor rechaza algo, se avisa y la pantalla
+vuelve al estado real. La base del navegador no se toca.
+
+Para dar el salto sin perder nada: entra como administrador en `http://localhost:3000`, abre
+**Administración** y pulsa **Llevar al servidor**. Se importan los datos del modo local y se suben sus
+archivos. Ver [`backend/README.md`](backend/README.md).
 
 ---
 
@@ -268,8 +281,10 @@ assets/
       eos.js                   VTO, rocas, scorecard y organigrama
       secciones-proyecto.js    Las 10 secciones de calidad, sus 52 campos y sus reglas
     almacenamiento.js          Preferencia de tema claro u oscuro
-    gestor.js                  Base de datos local: usuarios, proyectos, documentos, EVM, burndown…
-    archivos.js                Repositorio de evidencias (IndexedDB)
+    api.js                     Cliente HTTP del backend y detección del modo servidor
+    remoto.js                  Cola ordenada de escrituras hacia la API
+    gestor.js                  Datos del gestor (local o servidor): usuarios, proyectos, documentos, EVM, burndown…
+    archivos.js                Repositorio de evidencias (API o IndexedDB)
     indice.js                  Índice unificado de la guía para búsqueda y navegación
     render.js                  Construcción de HTML reutilizable
     ui.js                      Formularios, medidores y tablas editables
@@ -291,7 +306,8 @@ backend/                       API REST + PostgreSQL (ver backend/README.md)
   iniciar.cmd                  Arranca PostgreSQL y la API con doble clic
   db/migraciones/              Esquema SQL versionado
   src/                         Servidor Express: rutas, servicios, validación y permisos
-  tests/aceptacion/            10 historias de usuario, 91 criterios de aceptación
+  tests/aceptacion/            11 historias de usuario, 97 criterios de aceptación (API)
+  tests/e2e/                   Pruebas en navegador con Playwright y Edge
 ```
 
 El backend lee el mismo `assets/js/datos/`: al sustituir el contenido por el oficial, la API lo

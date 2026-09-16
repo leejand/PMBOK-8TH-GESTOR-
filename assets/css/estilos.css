@@ -2867,6 +2867,7 @@ html[data-tema="oscuro"] .d-aviso { background: rgb(40 40 47 / .94); border-colo
 .g-modo-datos svg.ic { width: 14px; height: 14px; color: var(--acento); }
 .g-acceso-solo { grid-template-columns: minmax(0, 460px); justify-content: center; }
 .g-acceso-solo .g-acceso-marca { margin-bottom: 18px; }
+.g-acceso-solo .g-acceso-marca sup { color: var(--tinta-3); }
 .g-migracion { margin-top: 26px; }
 .g-solo-lectura .g-num[readonly], .g-solo-lectura .g-vto-texto[readonly] { background: transparent; cursor: default; }
 .pa-check:disabled, .g-mover:disabled { cursor: default; opacity: .75; }
