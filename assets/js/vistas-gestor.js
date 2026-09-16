@@ -12,7 +12,8 @@ window.VistasGestor = (function () {
   /* ══════════════ ACCESO ══════════════ */
 
   function entrar() {
-    var hayCuentas = Gestor.lista('usuarios').length;
+    var servidor = Gestor.enServidor();
+    var cuentaInicial = Gestor.mostrarCuentaInicial();
 
     function rasgo(icono, titulo, texto) {
       return '<li>' + Iconos.svg(icono) + '<span><b>' + titulo + '</b>' + texto + '</span></li>';
@@ -58,13 +59,43 @@ window.VistasGestor = (function () {
           UI.texto('acc-correo', 'Correo electrónico', '', { tipo: 'email', placeholder: 'tu@organizacion.com' }) +
           UI.texto('acc-clave', 'Contraseña', '', { tipo: 'password', placeholder: '••••••••' }) +
           '<button class="btn primario g-ancho" data-g="entrar">Entrar ' + Iconos.svg('flecha-der', 'ic-flecha') + '</button>' +
-          (hayCuentas === 1
+          (cuentaInicial
             ? '<div class="nota"><div class="nota-titulo">Cuenta inicial</div>' +
               '<code>admin@pmbok.local</code> · <code>admin123</code><br>' +
-              '<span style="font-size:12.5px;color:var(--tinta-2)">Todo se guarda en este navegador. El control de acceso ' +
-              'separa espacios de trabajo entre compañeros; no protege secretos.</span>' +
+              '<span style="font-size:12.5px;color:var(--tinta-2)">' +
+              (servidor
+                ? 'Al entrar se te pedirá elegir una contraseña propia.'
+                : 'Todo se guarda en este navegador. El control de acceso ' +
+                  'separa espacios de trabajo entre compañeros; no protege secretos.') + '</span>' +
               '<div class="tarjeta-pie"><button class="btn" data-g="acceso-demo">' + Iconos.svg('rayo') + ' Rellenar y entrar</button></div></div>'
             : '') +
+          '<p class="g-modo-datos">' + (servidor
+            ? Iconos.svg('check-circulo') + ' Conectado al servidor: los datos se guardan en PostgreSQL.'
+            : 'Modo local: los datos se guardan en este navegador.') + '</p>' +
+        '</div>' +
+      '</section>' +
+      '</div>';
+  }
+
+  /* Contraseña que otra persona conoce (la inicial, la que puso un
+     administrador o la provisional de una importación) */
+  function cambiarClave() {
+    var u = Gestor.usuarioActual() || {};
+    return '<div class="g-acceso g-acceso-solo">' +
+      '<section class="g-acceso-formulario">' +
+        '<div class="g-acceso-tarjeta">' +
+          '<div class="g-acceso-marca"><span class="marca-glifo" aria-hidden="true">◆</span>' +
+            '<span>Gestor PMBOK<sup>®</sup> 8</span></div>' +
+          '<h2>Elige tu contraseña</h2>' +
+          '<p class="g-acceso-bajada">Hola, ' + R.escapar(u.nombre || '') + '. La contraseña con la que entraste ' +
+            'la conoce otra persona, así que debes cambiarla antes de continuar.</p>' +
+          '<div id="g-error-clave"></div>' +
+          UI.texto('cc-actual', 'Contraseña actual', '', { tipo: 'password', placeholder: '••••••••' }) +
+          UI.texto('cc-nueva', 'Nueva contraseña', '', { tipo: 'password', placeholder: 'mínimo 6 caracteres' }) +
+          UI.texto('cc-repetir', 'Repite la nueva contraseña', '', { tipo: 'password', placeholder: '••••••••' }) +
+          '<button class="btn primario g-ancho" data-g="cambiar-clave">Guardar y continuar ' +
+            Iconos.svg('flecha-der', 'ic-flecha') + '</button>' +
+          '<div class="tarjeta-pie"><button class="btn" data-g="salir">Salir</button></div>' +
         '</div>' +
       '</section>' +
       '</div>';
@@ -82,6 +113,7 @@ window.VistasGestor = (function () {
     });
     var activos = proyectos.filter(function (p) { return p.estado === 'activo'; }).length;
 
+    var creaProyectos = Gestor.puedeGestionar();
     var tarjetas = proyectos.length
       ? '<div class="g-proyectos">' + proyectos.map(tarjetaProyecto).join('') + '</div>'
       : '';
@@ -90,7 +122,9 @@ window.VistasGestor = (function () {
       '<div class="g-cabecera">' +
         '<div><div class="eyebrow">Panel de control</div>' +
         '<h1 class="titulo-pagina" style="margin:0">Hola, ' + R.escapar((u.nombre || '').split(' ')[0]) + '</h1></div>' +
-        '<button class="btn primario" data-g="abrir-nuevo-proyecto">' + Iconos.svg('mas') + ' Nuevo proyecto</button>' +
+        (creaProyectos
+          ? '<button class="btn primario" data-g="abrir-nuevo-proyecto">' + Iconos.svg('mas') + ' Nuevo proyecto</button>'
+          : '') +
       '</div>' +
       '<p class="bajada">Ruta sugerida: empieza por <b>Iniciar el proyecto o fase</b> y genera el acta de constitución. ' +
       'Desde ahí, cada proceso te dirá qué necesita y qué documento produce.</p>' +
@@ -102,8 +136,11 @@ window.VistasGestor = (function () {
         UI.cifra(Gestor.lista('portafolios').length, 'Portafolios', null, 'portafolios') +
       '</div>' +
 
-      '<div id="g-nuevo-proyecto"' + (abrirNuevo || !proyectos.length ? '' : ' hidden') + '>' +
-        formularioProyecto() + '</div>' +
+      (creaProyectos
+        ? '<div id="g-nuevo-proyecto"' + (abrirNuevo || !proyectos.length ? '' : ' hidden') + '>' +
+          formularioProyecto() + '</div>'
+        : (proyectos.length ? '' : UI.vacio('📁', 'Todavía no participas en ningún proyecto',
+            'Crear proyectos es tarea de un director o un administrador. Pídeles que te añadan al equipo o te den acceso.'))) +
 
       (proyectos.length ? '<h2>Tus proyectos <span class="pa-conteo">' + proyectos.length + '</span></h2>' + tarjetas : '') +
       '</div>';
@@ -205,6 +242,7 @@ window.VistasGestor = (function () {
     var lista = Gestor.lista('portafolios');
     var proyectos = Gestor.proyectosVisibles();
     var sinPortafolio = proyectos.filter(function (p) { return !p.portafolioId; });
+    var gestiona = Gestor.puedeGestionar();
 
     function grupo(nombre, icono, id, proys, descripcion) {
       var programas = id ? Gestor.lista('programas', { portafolioId: id }) : [];
@@ -212,7 +250,7 @@ window.VistasGestor = (function () {
         '<div class="g-portafolio-cab">' +
           '<h3>' + (Iconos.resolver(icono) || icono) + ' ' + R.escapar(nombre) + '</h3>' +
           '<span class="g-portafolio-conteo">' + proys.length + ' proyecto' + (proys.length === 1 ? '' : 's') + '</span>' +
-          (id ? '<button class="g-mini-x" data-g="borrar-portafolio" data-id="' + id + '" title="Eliminar portafolio">×</button>' : '') +
+          (id && gestiona ? '<button class="g-mini-x" data-g="borrar-portafolio" data-id="' + id + '" title="Eliminar portafolio">×</button>' : '') +
         '</div>' +
         (descripcion ? '<p class="g-portafolio-desc">' + R.escapar(descripcion) + '</p>' : '') +
         (programas.length
@@ -234,11 +272,13 @@ window.VistasGestor = (function () {
                 '</div>';
             }).join('') + '</div>'
           : '<p class="g-portafolio-vacio">Sin proyectos asignados.</p>') +
-        (id ? '<div class="tarjeta-pie"><button class="btn" data-g="nuevo-programa" data-id="' + id + '">+ Programa</button></div>' : '') +
+        (id && gestiona ? '<div class="tarjeta-pie"><button class="btn" data-g="nuevo-programa" data-id="' + id + '">+ Programa</button></div>' : '') +
         '</div>';
     }
 
+    /* Mover de portafolio es configuración del proyecto: la decide quien lo dirige */
     function selectorDestino(p) {
+      if (!Gestor.puede(p.id, 'dirigir')) return '';
       var opciones = [{ id: '', nombre: 'Sin portafolio' }].concat(
         lista.map(function (x) { return { id: x.id, nombre: x.nombre }; }));
       return '<select class="g-mover" data-mover="' + p.id + '">' + opciones.map(function (o) {
@@ -251,7 +291,7 @@ window.VistasGestor = (function () {
       '<div class="eyebrow">Organización</div>' +
       '<div class="g-cabecera">' +
         '<h1 class="titulo-pagina" style="margin:0">Portafolios y programas</h1>' +
-        '<button class="btn primario" data-g="abrir-nuevo-portafolio">' + Iconos.svg('mas') + ' Nuevo portafolio</button>' +
+        (gestiona ? '<button class="btn primario" data-g="abrir-nuevo-portafolio">' + Iconos.svg('mas') + ' Nuevo portafolio</button>' : '') +
       '</div>' +
       '<p class="bajada">Un portafolio agrupa programas y proyectos que compiten por los mismos recursos. ' +
       'Cambia el portafolio de un proyecto desde el selector de su fila.</p>' +
@@ -372,15 +412,18 @@ window.VistasGestor = (function () {
         '<span><b>' + R.escapar(s.nombre) + '</b><em>' + R.escapar(s.lema) + '</em></span></a>';
     }).join('');
 
+    var gestiona = Gestor.puedeGestionar();
     var cuerpo =
-      seccion === 'scorecard' ? eosScorecard() :
-      seccion === 'vto' ? eosVto() :
-      seccion === 'organigrama' ? eosOrganigrama() : eosRocas();
+      seccion === 'scorecard' ? eosScorecard(gestiona) :
+      seccion === 'vto' ? eosVto(gestiona) :
+      seccion === 'organigrama' ? eosOrganigrama(gestiona) : eosRocas(gestiona);
 
-    return '<div class="hoja-ancha prosa">' +
+    return '<div class="hoja-ancha prosa' + (gestiona ? '' : ' g-solo-lectura') + '">' +
       '<div class="eyebrow">Sistema operativo empresarial</div>' +
       '<h1 class="titulo-pagina">Gerencia general (EOS)</h1>' +
       '<p class="bajada">' + PMBOK.eos.intro + '</p>' +
+      (gestiona ? '' : '<div class="nota"><div class="nota-titulo">Solo lectura</div>' +
+        'La gerencia la editan directores y administradores.</div>') +
       '<div class="g-pestanas-eos">' + pestanas + '</div>' +
       cuerpo +
       '</div>';
@@ -391,14 +434,14 @@ window.VistasGestor = (function () {
     return 'Q' + (Math.floor(d.getMonth() / 3) + 1) + '-' + d.getFullYear();
   }
 
-  function eosRocas() {
+  function eosRocas(gestiona) {
     var trimestre = VistasGestor.trimestreElegido || trimestreActual();
     var rocas = Gestor.rocasDe(trimestre);
 
     var selector = '<div class="g-trimestres">' + PMBOK.trimestres.map(function (t) {
       return '<button class="g-trimestre' + (t === trimestre ? ' activo' : '') + '" data-g="trimestre" data-valor="' + t + '">' +
         t + '</button>';
-    }).join('') + '<button class="btn primario" data-g="abrir-nueva-roca" style="margin-left:auto">' + Iconos.svg('mas') + ' Nueva roca</button></div>';
+    }).join('') + (gestiona ? '<button class="btn primario" data-g="abrir-nueva-roca" style="margin-left:auto">' + Iconos.svg('mas') + ' Nueva roca</button>' : '') + '</div>';
 
     var formulario = '<div id="g-nueva-roca" hidden><div class="pa-panel">' +
       UI.texto('nr-titulo', 'Título de la roca', '', { placeholder: 'Ej.: Reducir el costo administrativo por empleado un 25 %' }) +
@@ -423,13 +466,13 @@ window.VistasGestor = (function () {
             '<div class="g-roca-cab">' +
               '<h3>' + R.escapar(r.titulo) + '</h3>' +
               UI.pastilla(est.nombre, est.color) +
-              '<button class="g-mini-x" data-g="borrar-roca" data-id="' + r.id + '" title="Eliminar">×</button>' +
+              (gestiona ? '<button class="g-mini-x" data-g="borrar-roca" data-id="' + r.id + '" title="Eliminar">×</button>' : '') +
             '</div>' +
             (r.descripcion ? '<p>' + R.escapar(r.descripcion) + '</p>' : '') +
             (metas.length
               ? '<ul class="g-metas">' + metas.map(function (m, i) {
                   return '<li><button class="pa-check' + (m.hecho ? ' activo' : '') + '" data-g="meta-roca" ' +
-                    'data-id="' + r.id + '" data-i="' + i + '">✓</button>' + R.escapar(m.texto) + '</li>';
+                    'data-id="' + r.id + '" data-i="' + i + '"' + (gestiona ? '' : ' disabled') + '>✓</button>' + R.escapar(m.texto) + '</li>';
                 }).join('') + '</ul>'
               : '') +
             '<div class="g-roca-pie">' +
@@ -437,7 +480,7 @@ window.VistasGestor = (function () {
               '<span>' + hechas + '/' + metas.length + ' metas</span>' +
               '<span>' + vinculados.length + ' proyecto' + (vinculados.length === 1 ? '' : 's') + ' vinculado' +
                 (vinculados.length === 1 ? '' : 's') + '</span>' +
-              '<select class="g-mover" data-estado-roca="' + r.id + '">' +
+              '<select class="g-mover" data-estado-roca="' + r.id + '"' + (gestiona ? '' : ' disabled') + '>' +
                 PMBOK.eos.estadosRoca.map(function (e) {
                   return '<option value="' + e.id + '"' + (e.id === r.estado ? ' selected' : '') + '>' + e.nombre + '</option>';
                 }).join('') + '</select>' +
@@ -446,11 +489,11 @@ window.VistasGestor = (function () {
       : UI.vacio('🪨', 'Sin rocas para ' + trimestre,
           'Define el objetivo trimestral más importante. De él se desprenden los portafolios y proyectos.');
 
-    return selector + formulario +
+    return selector + (gestiona ? formulario : '') +
       '<div class="nota"><div class="nota-titulo">Cómo se usa</div>' + PMBOK.eos.ayudaRocas + '</div>' + cuerpo;
   }
 
-  function eosScorecard() {
+  function eosScorecard(gestiona) {
     var metricas = Gestor.lista('metricas');
     var semanas = ultimasSemanas(13);
 
@@ -482,16 +525,16 @@ window.VistasGestor = (function () {
               var clase = estadoMetrica(m, v);
               return '<td class="g-celda-metrica ' + clase + '">' +
                 '<input class="g-num" data-metrica="' + m.id + '" data-semana="' + s.iso + '" ' +
-                'value="' + R.escapar(v == null ? '' : v) + '" inputmode="decimal"></td>';
+                'value="' + R.escapar(v == null ? '' : v) + '" inputmode="decimal"' + (gestiona ? '' : ' readonly') + '></td>';
             }).join('') +
-            '<td><button class="g-mini-x" data-g="borrar-metrica" data-id="' + m.id + '">×</button></td>' +
+            '<td>' + (gestiona ? '<button class="g-mini-x" data-g="borrar-metrica" data-id="' + m.id + '">×</button>' : '') + '</td>' +
             '</tr>';
         }).join('') + '</tbody></table></div>'
       : UI.vacio('📊', 'Sin métricas definidas',
           'Añade entre 5 y 15 números de la operación que se midan cada semana.');
 
-    return '<div class="g-trimestres"><button class="btn primario" data-g="abrir-nueva-metrica">' + Iconos.svg('mas') + ' Nueva métrica</button></div>' +
-      formulario +
+    return (gestiona ? '<div class="g-trimestres"><button class="btn primario" data-g="abrir-nueva-metrica">' + Iconos.svg('mas') + ' Nueva métrica</button></div>' +
+      formulario : '') +
       '<div class="nota"><div class="nota-titulo">Cómo se usa</div>' + PMBOK.eos.ayudaScorecard + '</div>' +
       tabla;
   }
@@ -517,15 +560,15 @@ window.VistasGestor = (function () {
     return salida;
   }
 
-  function eosVto() {
+  function eosVto(gestiona) {
     function bloque(b) {
       var valor = Gestor.vto(b.id);
       return '<div class="g-vto-bloque' + (valor ? ' lleno' : '') + '">' +
         '<div class="g-vto-cab"><b>' + R.escapar(b.nombre) + '</b>' +
           UI.pastilla(valor ? 'Definido' : 'Sin llenar', valor ? 'ok' : '') + '</div>' +
         '<p class="g-vto-ayuda">' + R.escapar(b.ayuda) + '</p>' +
-        '<textarea class="g-vto-texto" data-vto="' + b.id + '" rows="3" ' +
-        'placeholder="Escribe aquí…">' + R.escapar(valor) + '</textarea>' +
+        '<textarea class="g-vto-texto" data-vto="' + b.id + '" rows="3" ' + (gestiona ? '' : 'readonly ') +
+        'placeholder="' + (gestiona ? 'Escribe aquí…' : 'Sin llenar') + '">' + R.escapar(valor) + '</textarea>' +
         '</div>';
     }
     var vision = PMBOK.eos.vto.filter(function (b) { return b.lado === 'vision'; });
@@ -536,7 +579,7 @@ window.VistasGestor = (function () {
       '<h2>Tracción</h2><div class="g-vto">' + traccion.map(bloque).join('') + '</div>';
   }
 
-  function eosOrganigrama() {
+  function eosOrganigrama(gestiona) {
     function rama(padreId, nivel) {
       var hijos = Gestor.asientosHijos(padreId);
       if (!hijos.length) return '';
@@ -545,18 +588,18 @@ window.VistasGestor = (function () {
         return '<li>' +
           '<div class="g-asiento">' +
             '<div class="g-asiento-cab"><b>' + R.escapar(a.nombre) + '</b>' +
-              '<button class="g-mini-x" data-g="borrar-asiento" data-id="' + a.id + '">×</button></div>' +
+              (gestiona ? '<button class="g-mini-x" data-g="borrar-asiento" data-id="' + a.id + '">×</button>' : '') + '</div>' +
             (a.gwt ? '<div class="g-asiento-gwt">' + R.escapar(a.gwt) + '</div>' : '') +
             '<div class="g-asiento-persona">' + UI.avatar(persona ? persona.nombre : '—') +
               R.escapar(persona ? persona.nombre : 'asiento vacante') + '</div>' +
-            '<button class="pa-mini" data-g="abrir-asiento" data-padre="' + a.id + '">+ asiento debajo</button>' +
+            (gestiona ? '<button class="pa-mini" data-g="abrir-asiento" data-padre="' + a.id + '">+ asiento debajo</button>' : '') +
           '</div>' + rama(a.id, nivel + 1) + '</li>';
       }).join('') + '</ul>';
     }
 
     var raiz = Gestor.asientosHijos(null);
     return '<div class="nota"><div class="nota-titulo">Cómo se usa</div>' + PMBOK.eos.ayudaOrganigrama + '</div>' +
-      '<div class="g-trimestres"><button class="btn primario" data-g="abrir-asiento" data-padre="">' + Iconos.svg('mas') + ' Nuevo asiento raíz</button></div>' +
+      (gestiona ? '<div class="g-trimestres"><button class="btn primario" data-g="abrir-asiento" data-padre="">' + Iconos.svg('mas') + ' Nuevo asiento raíz</button></div>' : '') +
       '<div id="g-nuevo-asiento" hidden><div class="pa-panel">' +
         UI.texto('na-nombre', 'Nombre del asiento', '', { placeholder: 'Ej.: Integrador / Director de operaciones' }) +
         UI.area('na-gwt', 'Qué hace (5-10 palabras)', '', { filas: 2, ayuda: 'Get it, Want it, Capacity to do it.' }) +
@@ -631,14 +674,37 @@ window.VistasGestor = (function () {
       R.tabla(['Rol', 'Alcance'], Gestor.roles.map(function (r) { return [r.nombre, r.descripcion]; })) +
 
       '<h2>Datos</h2>' +
-      '<p>Toda la información del gestor vive en este navegador. Expórtala para conservarla o llevarla a otro equipo. ' +
-      'Las contraseñas no se incluyen en la exportación.</p>' +
+      (Gestor.enServidor()
+        ? '<p>La información del gestor vive en el servidor (PostgreSQL). Expórtala para conservar una copia o ' +
+          'llevarla a otro equipo. Las contraseñas no se incluyen en la exportación; al importar, las cuentas ' +
+          'nuevas reciben la contraseña provisional <code>cambiar123</code> y deben cambiarla al entrar.</p>'
+        : '<p>Toda la información del gestor vive en este navegador. Expórtala para conservarla o llevarla a otro equipo. ' +
+          'Las contraseñas no se incluyen en la exportación.</p>') +
       '<div class="tarjeta-pie">' +
         '<button class="btn" data-g="exportar-bd">Exportar datos (.json)</button>' +
         '<label class="btn" for="g-importar">Importar datos</label>' +
         '<input type="file" id="g-importar" accept=".json" hidden>' +
         '<button class="btn" data-g="reiniciar-bd">Borrar todo</button>' +
       '</div>' +
+      panelMigracion() +
+      '</div>';
+  }
+
+  /* Lo que quedó guardado en este navegador antes de usar el servidor */
+  function panelMigracion() {
+    if (!Gestor.enServidor()) return '';
+    var d = Gestor.datosDelNavegador();
+    if (!d) return '';
+    function n(v, uno, varios) { return v + ' ' + (v === 1 ? uno : varios); }
+    return '<div class="pa-panel g-migracion" id="g-migracion">' +
+      '<div class="pa-panel-cab"><h2 style="margin:0">Datos guardados en este navegador</h2></div>' +
+      '<p>Este navegador conserva trabajo del modo local: ' +
+        [n(d.proyectos, 'proyecto', 'proyectos'), n(d.documentos, 'documento', 'documentos'),
+         n(d.archivos, 'archivo', 'archivos'), n(d.usuarios, 'cuenta', 'cuentas')].join(' · ') + '.</p>' +
+      '<p>Puedes llevarlo al servidor. <b>Reemplaza todos los datos que haya ahora en el servidor</b>; ' +
+        'los archivos se suben uno a uno y lo del navegador no se borra.</p>' +
+      '<div id="g-migracion-estado"></div>' +
+      '<div class="tarjeta-pie"><button class="btn primario" data-g="llevar-al-servidor">Llevar al servidor</button></div>' +
       '</div>';
   }
 
@@ -809,6 +875,12 @@ window.VistasGestor = (function () {
       var correo = document.getElementById('acc-correo');
       if (correo) correo.focus();
     }
+    if (vista === 'clave') {
+      var repetir = document.getElementById('cc-repetir');
+      if (repetir) repetir.addEventListener('keydown', function (e) { if (e.key === 'Enter') accionCambiarClave(); });
+      var actual = document.getElementById('cc-actual');
+      if (actual) actual.focus();
+    }
 
     conectarSelectores();
     conectarFiltros();
@@ -912,11 +984,68 @@ window.VistasGestor = (function () {
       R.escapar(mensaje) + '</div>';
   }
 
+  /* Deshabilita el botón mientras una acción espera al servidor */
+  function ocupado(selector, si) {
+    var b = document.querySelector(selector);
+    if (b) { b.disabled = si; b.setAttribute('aria-busy', si ? 'true' : 'false'); }
+  }
+
   function accionEntrar() {
-    var r = Gestor.entrar(UI.valorDe('acc-correo'), UI.valorDe('acc-clave'));
-    if (r.error) { error('g-error-acceso', r.error); return; }
-    location.hash = '#/panel';
-    recargar();
+    ocupado('[data-g="entrar"]', true);
+    /* En modo local el resultado llega al instante; en modo servidor, en una promesa */
+    Promise.resolve(Gestor.entrar(UI.valorDe('acc-correo'), UI.valorDe('acc-clave'))).then(function (r) {
+      ocupado('[data-g="entrar"]', false);
+      if (r.error) { error('g-error-acceso', r.error); return; }
+      location.hash = r.clavePendiente ? '#/clave' : '#/panel';
+      recargar();
+    });
+  }
+
+  function accionCambiarClave() {
+    var actual = UI.valorDe('cc-actual');
+    var nueva = UI.valorDe('cc-nueva');
+    if (nueva !== UI.valorDe('cc-repetir')) { error('g-error-clave', 'Las dos contraseñas nuevas no coinciden.'); return; }
+    ocupado('[data-g="cambiar-clave"]', true);
+    Gestor.cambiarPropiaClave(actual, nueva).then(function (r) {
+      ocupado('[data-g="cambiar-clave"]', false);
+      if (r.error) { error('g-error-clave', r.error); return; }
+      location.hash = '#/panel';
+      recargar();
+      Dialogo.avisar('Contraseña actualizada');
+    });
+  }
+
+  function accionLlevarAlServidor() {
+    var d = Gestor.datosDelNavegador();
+    if (!d) return;
+    Dialogo.confirmar({
+      titulo: 'Llevar los datos del navegador al servidor',
+      texto: 'Se <b>reemplazan todos los datos del servidor</b> por los ' + d.proyectos + ' proyecto(s) de este navegador, ' +
+        'y se suben sus ' + d.archivos + ' archivo(s). Si alguien más usa el servidor, exporta antes una copia.',
+      confirmar: 'Reemplazar y llevar', peligro: true
+    }, function () {
+      var caja = document.getElementById('g-migracion-estado');
+      ocupado('[data-g="llevar-al-servidor"]', true);
+      Gestor.llevarNavegadorAlServidor(function (texto) {
+        if (caja) caja.innerHTML = '<p class="g-cargando">' + R.escapar(texto) + '</p>';
+      }).then(function (r) {
+        if (r.error) {
+          ocupado('[data-g="llevar-al-servidor"]', false);
+          if (caja) caja.innerHTML = '';
+          Dialogo.avisar('No se pudo llevar al servidor: ' + r.error, 'error');
+          return;
+        }
+        var importados = Object.keys(r.importados || {}).reduce(function (n, k) { return n + r.importados[k]; }, 0);
+        var lineas = ['<b>' + importados + '</b> registros importados y <b>' + r.archivosSubidos + '</b> archivo(s) subidos.']
+          .concat(r.avisos || [])
+          .concat((r.archivosFallidos || []).map(function (f) { return 'No se subió ' + f; }));
+        Dialogo.informar({
+          titulo: 'Datos llevados al servidor',
+          texto: lineas.map(function (l, i) { return i ? R.escapar(l) : l; }).join('<br>')
+        });
+        recargar();
+      });
+    });
   }
 
   function alternar(id, mostrar) {
@@ -933,6 +1062,8 @@ window.VistasGestor = (function () {
 
     switch (accion) {
       case 'entrar': accionEntrar(); break;
+      case 'cambiar-clave': accionCambiarClave(); break;
+      case 'llevar-al-servidor': accionLlevarAlServidor(); break;
 
       case 'acceso-demo':
         document.getElementById('acc-correo').value = 'admin@pmbok.local';
@@ -941,9 +1072,10 @@ window.VistasGestor = (function () {
         break;
 
       case 'salir':
-        Gestor.salir();
-        location.hash = '#/entrar';
-        recargar();
+        Promise.resolve(Gestor.salir()).then(function () {
+          location.hash = '#/entrar';
+          recargar();
+        });
         break;
 
       case 'abrir-nuevo-proyecto': {
@@ -956,7 +1088,8 @@ window.VistasGestor = (function () {
       case 'cerrar-nuevo-proyecto': alternar('g-nuevo-proyecto', false); break;
 
       case 'crear-proyecto': {
-        var r = Gestor.crearProyecto({
+        ocupado('[data-g="crear-proyecto"]', true);
+        var pendiente = Gestor.crearProyecto({
           nombre: UI.valorDe('np-nombre'),
           descripcion: UI.valorDe('np-descripcion'),
           metodologia: UI.valorDe('val-metodologia'),
@@ -966,11 +1099,14 @@ window.VistasGestor = (function () {
           fin: UI.valorDe('np-fin'),
           presupuesto: UI.valorDe('np-presupuesto')
         });
-        if (r.error) { error('g-error-proyecto', r.error); return; }
-        location.hash = '#/proyectos/' + r.proyecto.id;
-        Dialogo.avisar('Proyecto creado. Empieza por 2.1.1 Iniciar el Proyecto o Fase', 'ok', {
-          etiqueta: 'Abrir 2.1.1',
-          hacer: function () { location.hash = '#/proyectos/' + r.proyecto.id + '/proceso/p-gob-01'; }
+        Promise.resolve(pendiente).then(function (r) {
+          ocupado('[data-g="crear-proyecto"]', false);
+          if (r.error) { error('g-error-proyecto', r.error); return; }
+          location.hash = '#/proyectos/' + r.proyecto.id;
+          Dialogo.avisar('Proyecto creado. Empieza por 2.1.1 Iniciar el Proyecto o Fase', 'ok', {
+            etiqueta: 'Abrir 2.1.1',
+            hacer: function () { location.hash = '#/proyectos/' + r.proyecto.id + '/proceso/p-gob-01'; }
+          });
         });
         break;
       }
@@ -996,10 +1132,7 @@ window.VistasGestor = (function () {
             : 'El portafolio está vacío.',
           confirmar: 'Eliminar portafolio', peligro: true
         }, function () {
-          Gestor.lista('proyectos', { portafolioId: id }).forEach(function (p) {
-            Gestor.actualizar('proyectos', p.id, { portafolioId: null });
-          });
-          Gestor.borrar('portafolios', id);
+          Gestor.borrarPortafolio(id);
           Dialogo.avisar('Portafolio eliminado');
           recargar();
         });
@@ -1181,19 +1314,24 @@ window.VistasGestor = (function () {
       }
 
       case 'exportar-bd':
-        descargar('pmbok8-gestor.json', JSON.stringify(Gestor.exportarTodo(), null, 2));
+        Promise.resolve(Gestor.exportarTodo()).then(function (datos) {
+          descargar('pmbok8-gestor.json', JSON.stringify(datos, null, 2));
+        }, function (err) { Dialogo.avisar('No se pudo exportar: ' + err.message, 'error'); });
         break;
 
       case 'reiniciar-bd':
         Dialogo.confirmar({
           titulo: 'Borrar todos los datos',
-          texto: 'Se eliminan <b>todos</b> los proyectos, documentos, usuarios y datos de gerencia de este navegador. ' +
+          texto: 'Se eliminan <b>todos</b> los proyectos, documentos, usuarios y datos de gerencia ' +
+            (Gestor.enServidor() ? 'del servidor' : 'de este navegador') + '. ' +
             'No se puede deshacer: exporta antes si quieres conservarlos.',
           confirmar: 'Borrar todo', peligro: true
         }, function () {
-          Gestor.reiniciarTodo();
-          location.hash = '#/entrar';
-          recargar();
+          Promise.resolve(Gestor.reiniciarTodo()).then(function (r) {
+            if (r && r.error) { Dialogo.avisar(r.error, 'error'); return; }
+            location.hash = '#/entrar';
+            recargar();
+          });
         });
         break;
     }
@@ -1219,18 +1357,24 @@ window.VistasGestor = (function () {
       if (!f) return;
       var fr = new FileReader();
       fr.onload = function () {
-        try {
-          var r = Gestor.importarTodo(JSON.parse(String(fr.result)));
+        var datos;
+        try { datos = JSON.parse(String(fr.result)); }
+        catch (e) { Dialogo.avisar('El archivo no es un JSON válido', 'error'); return; }
+        Promise.resolve(Gestor.importarTodo(datos)).then(function (r) {
           Dialogo.avisar(r.error || 'Datos importados', r.error ? 'error' : 'ok');
+          if (r.avisos && r.avisos.length) {
+            Dialogo.informar({ titulo: 'Importación terminada', texto: r.avisos.map(R.escapar).join('<br>') });
+          }
           if (!r.error) recargarVista();
-        } catch (e) { Dialogo.avisar('El archivo no es un JSON válido', 'error'); }
+        });
+        imp.value = '';
       };
       fr.readAsText(f, 'utf-8');
     });
   }
 
   return {
-    entrar: entrar, panel: panel, portafolios: portafolios, agenda: agenda,
+    entrar: entrar, cambiarClave: cambiarClave, panel: panel, portafolios: portafolios, agenda: agenda,
     eos: eos, admin: admin, aprender: aprender,
     herramientas: herramientas, artefactos: artefactos,
     calendario: calendario, tarjetaProyecto: tarjetaProyecto,

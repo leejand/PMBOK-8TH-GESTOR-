@@ -2848,3 +2848,26 @@ html[data-tema="oscuro"] .d-aviso { background: rgb(40 40 47 / .94); border-colo
   .pa-dial-valor { stroke: #000; }
   .d-capa, .d-avisos, .g-paso .btn, .gf-tabla summary { display: none !important; }
 }
+
+
+/* ══════════════ Modo servidor ══════════════ */
+
+.g-sincro {
+  font-size: 11.5px; font-weight: 550; color: var(--tinta-3);
+  min-width: 0; opacity: 0; transition: opacity .2s ease;
+}
+.g-sincro.activo, .g-sincro.hecho { opacity: 1; }
+.g-sincro.activo { color: var(--tinta-2); }
+.g-sincro.hecho { color: var(--acento); }
+.g-cargando { color: var(--tinta-3); font-size: 13.4px; }
+.g-modo-datos {
+  display: flex; align-items: center; gap: 6px; margin: 16px 0 0;
+  font-size: 12.3px; color: var(--tinta-3);
+}
+.g-modo-datos svg.ic { width: 14px; height: 14px; color: var(--acento); }
+.g-acceso-solo { grid-template-columns: minmax(0, 460px); justify-content: center; }
+.g-acceso-solo .g-acceso-marca { margin-bottom: 18px; }
+.g-migracion { margin-top: 26px; }
+.g-solo-lectura .g-num[readonly], .g-solo-lectura .g-vto-texto[readonly] { background: transparent; cursor: default; }
+.pa-check:disabled, .g-mover:disabled { cursor: default; opacity: .75; }
+@media (prefers-reduced-motion: reduce) { .g-sincro { transition: none; } }

@@ -50,13 +50,16 @@ function crearApp() {
     const fila = await db.uno(
       `SELECT current_database() AS base, version() AS version,
               (SELECT count(*) FROM catalogo_procesos) AS procesos,
-              (SELECT count(*) FROM catalogo_artefactos) AS artefactos`);
+              (SELECT count(*) FROM catalogo_artefactos) AS artefactos,
+              (SELECT count(*) = 1 AND bool_and(debe_cambiar_clave) FROM usuarios) AS primer_uso`);
     res.json({
       ok: true,
       bd: 'conectada',
       base: fila.base,
       postgres: fila.version.split(' ').slice(0, 2).join(' '),
       catalogo: { procesos: fila.procesos, artefactos: fila.artefactos, enMemoria: catalogo.cargar().flujo.length },
+      /* Solo existe la cuenta inicial y aún tiene su contraseña por defecto */
+      primerUso: fila.primer_uso === true,
       hora: new Date().toISOString()
     });
   });

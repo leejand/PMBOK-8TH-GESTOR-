@@ -16,7 +16,8 @@
      `p` son los segmentos tras el nombre de la ruta. */
   var RUTAS = {
     entrar:       { vista: function () { return VistasGestor.entrar(); }, publica: true },
-    panel:        { vista: function (p) { return VistasGestor.panel(p[0] === 'nuevo'); } },
+    clave:        { vista: function () { return VistasGestor.cambiarClave(); }, publica: true },
+    panel:      { vista: function (p) { return VistasGestor.panel(p[0] === 'nuevo'); } },
     portafolios:  { vista: function () { return VistasGestor.portafolios(); } },
     agenda:       { vista: function (p) { return VistasGestor.agenda(p[0]); } },
     eos:          { vista: function (p) { return VistasGestor.eos(p[0]); } },
@@ -31,7 +32,7 @@
     principio:    { vista: function (p) { return Vistas.principio(p[0]); } }
   };
 
-  var DE_GESTOR = ['entrar', 'panel', 'portafolios', 'agenda', 'eos', 'admin',
+  var DE_GESTOR = ['entrar', 'clave', 'panel', 'portafolios', 'agenda', 'eos', 'admin',
                    'aprender', 'herramientas', 'artefactos'];
 
   function leerRuta() {
@@ -43,9 +44,16 @@
     var ruta = leerRuta();
     var sesion = Gestor.haySesion();
 
-    /* Sin sesión solo existe la pantalla de acceso; con sesión, no */
-    if (!sesion && ruta.nombre !== 'entrar') { location.replace('#/entrar'); return; }
-    if (sesion && (ruta.nombre === 'entrar' || !ruta.nombre)) { location.replace('#/panel'); return; }
+    /* Una contraseña que otra persona conoce se cambia antes de nada.
+       Sin sesión solo existe la pantalla de acceso; con sesión, no. */
+    if (Gestor.clavePendiente()) {
+      if (ruta.nombre !== 'clave') { location.replace('#/clave'); return; }
+    } else {
+      if (!sesion && ruta.nombre !== 'entrar') { location.replace('#/entrar'); return; }
+      if (sesion && (ruta.nombre === 'entrar' || ruta.nombre === 'clave' || !ruta.nombre)) {
+        location.replace('#/panel'); return;
+      }
+    }
 
     document.documentElement.setAttribute('data-sesion', sesion ? 'si' : 'no');
 
@@ -115,7 +123,7 @@
   function titulo(ruta) {
     var base = 'Gestor PMBOK® 8';
     var nombres = {
-      entrar: 'Acceso', panel: 'Panel', portafolios: 'Portafolios', agenda: 'Agenda',
+      entrar: 'Acceso', clave: 'Cambiar contraseña', panel: 'Panel', portafolios: 'Portafolios', agenda: 'Agenda',
       eos: 'EOS Gerencia', admin: 'Administración', aprender: 'Aprender',
       herramientas: 'Herramientas', artefactos: 'Artefactos', procesos: 'Los 40 procesos'
     };
@@ -293,24 +301,46 @@
     if (!u) { caja.innerHTML = ''; caja.hidden = true; return; }
 
     var rol = Gestor.roles.filter(function (r) { return r.id === u.rol; })[0];
+    var servidor = Gestor.enServidor();
     caja.hidden = false;
     caja.innerHTML =
+      (servidor ? '<span class="g-sincro" id="estado-sincro" role="status" aria-live="polite"></span>' : '') +
       '<span class="g-avatar" aria-hidden="true">' + Render.escapar(UI.iniciales(u.nombre)) + '</span>' +
       '<span class="g-usuario-datos"><b>' + Render.escapar(u.nombre) + '</b>' +
       '<em>' + Render.escapar(rol ? rol.nombre : u.rol) + '</em></span>' +
       '<button class="btn-icono" id="btn-salir" title="Cerrar sesión" aria-label="Cerrar sesión">' +
       Iconos.svg('salir') + '</button>';
+    if (window.Remoto && Remoto.pendientes()) pintarSincro(Remoto.pendientes());
 
     document.getElementById('btn-salir').addEventListener('click', function () {
       Dialogo.confirmar({
         titulo: 'Cerrar sesión',
-        texto: 'Tu trabajo ya está guardado en este navegador. Podrás volver a entrar con tu correo.',
+        texto: servidor
+          ? 'Tu trabajo está guardado en el servidor. Podrás volver a entrar con tu correo desde cualquier navegador de este equipo.'
+          : 'Tu trabajo ya está guardado en este navegador. Podrás volver a entrar con tu correo.',
         confirmar: 'Cerrar sesión'
       }, function () {
-        Gestor.salir();
-        location.hash = '#/entrar';
+        var hecho = function () { location.hash = '#/entrar'; resolver(); };
+        if (window.Remoto && servidor) Remoto.esperar().then(Gestor.salir).then(hecho, hecho);
+        else { Gestor.salir(); hecho(); }
       });
     });
+  }
+
+  /* «Guardando…» mientras quedan cambios camino del servidor */
+  var temporizadorSincro = null;
+  function pintarSincro(pendientes) {
+    var el = document.getElementById('estado-sincro');
+    if (!el) return;
+    clearTimeout(temporizadorSincro);
+    if (pendientes > 0) {
+      el.textContent = 'Guardando…';
+      el.className = 'g-sincro activo';
+    } else {
+      el.textContent = 'Guardado';
+      el.className = 'g-sincro hecho';
+      temporizadorSincro = setTimeout(function () { el.className = 'g-sincro'; el.textContent = ''; }, 1600);
+    }
   }
 
   /* ══════════════ Lateral en móvil ══════════════ */
@@ -333,8 +363,6 @@
   function iniciar() {
     Buscador.iniciar();
 
-    window.addEventListener('hashchange', resolver);
-
     document.getElementById('btn-tema').addEventListener('click', function () {
       if (window.Efectos) Efectos.alternarTema(Almacen.alternarTema);
       else Almacen.alternarTema();
@@ -353,7 +381,19 @@
       if (e.key === 'Escape' && lateral.classList.contains('abierto')) cerrarLateral();
     });
 
-    resolver();
+    /* Con backend, primero se detecta el servidor y se carga lo visible */
+    contenido.innerHTML = '<div class="hoja"><p class="g-cargando">Cargando…</p></div>';
+    Gestor.alCambiar(resolver);
+    if (window.Remoto) Remoto.alCambiarEstado(pintarSincro);
+    Gestor.iniciar().then(function (modo) {
+      document.documentElement.setAttribute('data-modo', modo);
+      window.addEventListener('hashchange', resolver);
+      resolver();
+    }, function (err) {
+      if (window.console) console.error(err);
+      window.addEventListener('hashchange', resolver);
+      resolver();
+    });
   }
 
   if (document.readyState === 'loading') {

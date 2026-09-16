@@ -1,10 +1,11 @@
 /* ═══════════════════════════════════════════════════════════
    archivos.js — Repositorio de evidencias del proyecto
    ───────────────────────────────────────────────────────────
-   Los metadatos viven en la base local del gestor; el contenido
-   binario en IndexedDB. Si IndexedDB no está disponible —pasa al
-   abrir la página con doble clic en algunos navegadores— se cae
-   con elegancia a localStorage, con un límite de tamaño menor.
+   Modo servidor: el archivo se sube a la API y queda en PostgreSQL.
+   Modo local: los metadatos viven en la base local del gestor y el
+   contenido binario en IndexedDB. Si IndexedDB no está disponible
+   —pasa al abrir la página con doble clic en algunos navegadores—
+   se cae con elegancia a localStorage, con un límite menor.
    ═══════════════════════════════════════════════════════════ */
 
 window.Archivos = (function () {
@@ -99,12 +100,51 @@ window.Archivos = (function () {
     try { localStorage.removeItem(claveRespaldo(id)); } catch (e) {}
   }
 
+  /* Contenido guardado en este navegador, como Blob (para llevarlo al servidor) */
+  function leerLocal(meta) {
+    return new Promise(function (resolver, rechazar) {
+      if (meta.almacen === 'local') {
+        var d = leerRespaldo(meta.id);
+        if (!d) return rechazar('el contenido no está en este navegador');
+        return fetch(d).then(function (r) { return r.blob(); }).then(resolver, rechazar);
+      }
+      leerBlob(meta.id, function (err, blob) {
+        if (err || !blob) return rechazar('el contenido no está en este navegador');
+        resolver(blob);
+      });
+    });
+  }
+
+  /* ══════════════ Modo servidor ══════════════ */
+
+  function subirAlServidor(proyectoId, archivo, categoria, cb) {
+    var f = new FormData();
+    f.append('id', Gestor.nuevoId('arch'));
+    f.append('categoria', categoria || 'general');
+    f.append('archivo', archivo, archivo.name);
+    Remoto.enCola(function () {
+      return Api.pedir('POST', '/proyectos/' + Api.c(proyectoId) + '/archivos', f);
+    }).then(function (meta) {
+      Gestor.anotar('archivos', meta);
+      cb(null, meta);
+    }, function (err) { cb(err.message); });
+  }
+
+  function blobDelServidor(id) {
+    return Api.pedir('GET', '/archivos/' + Api.c(id) + '/contenido');
+  }
+
+  /* Solo se abren en una pestaña los tipos que no ejecutan código:
+     un HTML o un SVG abierto así correría con el origen de la aplicación */
+  var SEGUROS = /^(image\/(png|jpe?g|gif|webp)|application\/pdf|text\/plain)(;|$)/i;
+
   /* ══════════════ API ══════════════ */
 
   function subir(proyectoId, archivo, categoria, cb) {
     if (archivo.size > LIMITE) {
       return cb('El archivo supera los 10 MB. Sube una versión más ligera o enlázalo desde un documento.');
     }
+    if (Gestor.enServidor()) return subirAlServidor(proyectoId, archivo, categoria, cb);
 
     var id = Gestor.nuevoId('arch');
     var meta = {
@@ -146,6 +186,11 @@ window.Archivos = (function () {
     var meta = Gestor.uno('archivos', id);
     if (!meta) return cb('El archivo ya no existe.');
 
+    if (Gestor.enServidor()) {
+      return blobDelServidor(id).then(function (blob) {
+        cb(null, URL.createObjectURL(blob), true, blob.type);
+      }, function (err) { cb(err.message); });
+    }
     if (meta.almacen === 'local') {
       var d = leerRespaldo(id);
       return d ? cb(null, d, false) : cb('El contenido del archivo se perdió.');
@@ -157,6 +202,11 @@ window.Archivos = (function () {
   }
 
   function abrir(id) {
+    var meta = Gestor.uno('archivos', id);
+    if (meta && !SEGUROS.test(meta.tipo || '')) {
+      Dialogo.avisar('Este tipo de archivo se descarga en lugar de abrirse', 'aviso');
+      return descargar(id);
+    }
     urlDe(id, function (err, url, temporal) {
       if (err) { Dialogo.avisar(err, 'error'); return; }
       var v = window.open(url, '_blank');
@@ -190,6 +240,7 @@ window.Archivos = (function () {
   function eliminar(id) {
     var meta = Gestor.uno('archivos', id);
     if (!meta) return;
+    if (Gestor.enServidor()) return Gestor.borrar('archivos', id);
     if (meta.almacen === 'local') borrarRespaldo(id);
     else borrarBlob(id);
     Gestor.borrar('archivos', id);
@@ -221,7 +272,7 @@ window.Archivos = (function () {
 
   return {
     subir: subir, abrir: abrir, descargar: descargar, eliminar: eliminar,
-    de: de, urlDe: urlDe, categorias: CATEGORIAS,
+    de: de, urlDe: urlDe, leerLocal: leerLocal, categorias: CATEGORIAS,
     formatoTamano: formatoTamano, icono: icono
   };
 })();

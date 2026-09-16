@@ -1,14 +1,21 @@
 /* ═══════════════════════════════════════════════════════════
-   gestor.js — Base de datos local del gestor de proyectos
+   gestor.js — Base de datos del gestor de proyectos
    ───────────────────────────────────────────────────────────
    Usuarios y sesión, portafolios y programas, proyectos con sus
    40 procesos, documentos, riesgos, interesados, cambios,
    lecciones, tareas, sprints, mediciones de valor ganado y la
    capa EOS de gerencia.
 
-   Todo vive en el navegador (localStorage). El control de acceso
-   es organizativo, no criptográfico: sirve para separar espacios
-   de trabajo entre compañeros, no para proteger secretos.
+   Dos modos, con la misma interfaz síncrona para las pantallas:
+   · LOCAL (index.html con doble clic o sin backend): todo vive en
+     localStorage. El control de acceso es organizativo: separa
+     espacios de trabajo entre compañeros, no protege secretos.
+   · SERVIDOR (servido por backend/ con PostgreSQL): al entrar se
+     carga en memoria lo que el usuario puede ver (GET /api/estado);
+     cada cambio se aplica al instante en esa copia y se envía a la
+     API en orden (remoto.js). Si la API lo rechaza, se avisa y se
+     recarga el estado real. La base del navegador no se toca, para
+     poder llevarla al servidor desde Administración.
    ═══════════════════════════════════════════════════════════ */
 
 window.Gestor = (function () {
@@ -16,6 +23,9 @@ window.Gestor = (function () {
 
   var CLAVE = 'pmbok8.bd';
   var bd = null;
+  var modo = 'local';
+  var clavePendiente = false;
+  var alCambiar = function () {};
 
   var COLECCIONES = [
     'usuarios', 'permisos', 'portafolios', 'programas', 'proyectos', 'miembros',
@@ -23,6 +33,8 @@ window.Gestor = (function () {
     'lecciones', 'tareas', 'sprints', 'mediciones', 'comentarios',
     'rocas', 'metricas', 'asientos'
   ];
+
+  function enServidor() { return modo === 'servidor'; }
 
   /* ══════════════ Persistencia ══════════════ */
 
@@ -34,6 +46,7 @@ window.Gestor = (function () {
 
   function cargar() {
     if (bd) return bd;
+    if (enServidor()) { bd = vacia(); return bd; }
     try {
       var crudo = localStorage.getItem(CLAVE);
       bd = crudo ? JSON.parse(crudo) : null;
@@ -45,6 +58,7 @@ window.Gestor = (function () {
   }
 
   function guardar() {
+    if (enServidor()) return true;
     try {
       localStorage.setItem(CLAVE, JSON.stringify(bd));
       return true;
@@ -54,9 +68,18 @@ window.Gestor = (function () {
   }
 
   function reiniciarTodo() {
+    if (enServidor()) {
+      return Remoto.esperar()
+        .then(function () { return Api.pedir('POST', '/datos/reiniciar', { confirmacion: 'ELIMINAR' }); })
+        .then(function (r) {
+          if (!r.sesionConservada) { olvidarSesion(); return { ok: true }; }
+          return hidratarOClavePendiente().then(function () { return { ok: true }; });
+        }, function (err) { return { error: err.message }; });
+    }
     bd = vacia();
     sembrar();
     guardar();
+    return { ok: true };
   }
 
   /* ══════════════ Utilidades ══════════════ */
@@ -64,11 +87,12 @@ window.Gestor = (function () {
   var contador = 0;
   function nuevoId(prefijo) {
     contador++;
-    return (prefijo || 'x') + '-' + Date.now().toString(36) + '-' + contador.toString(36);
+    return (prefijo || 'x') + '-' + Date.now().toString(36) + '-' + contador.toString(36) +
+      Math.random().toString(36).slice(2, 6);
   }
 
-  /* Huella de la contraseña. No es criptografía: evita guardarla
-     en claro, nada más. El almacenamiento es local por diseño. */
+  /* Huella de la contraseña en modo local. No es criptografía: evita
+     guardarla en claro, nada más. En modo servidor se usa bcrypt. */
   function huella(texto) {
     var h = 5381;
     var s = String(texto || '');
@@ -79,6 +103,154 @@ window.Gestor = (function () {
   }
 
   function ahora() { return Date.now(); }
+
+  function copia(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+  /* ══════════════ Modo servidor: carga y sincronización ══════════════ */
+
+  /* Rutas REST de las colecciones que se sincronizan con crear/actualizar/borrar */
+  var RUTA_PROYECTO = ['miembros', 'riesgos', 'interesados', 'cambios', 'lecciones',
+                       'tareas', 'sprints', 'mediciones', 'comentarios'];
+  var RUTA_GLOBAL = ['portafolios', 'rocas', 'metricas', 'asientos'];
+  var RUTA_ITEM = RUTA_PROYECTO.concat(RUTA_GLOBAL,
+    ['programas', 'documentos', 'archivos', 'usuarios', 'permisos', 'proyectos']);
+  /* Campos calculados que la API añade a sus respuestas y no se guardan */
+  var CALCULADOS = ['severidad', 'sprintCerrado', 'progreso', 'siguiente', 'completitud', 'plantilla'];
+
+  function iniciar() {
+    if (!window.Api) return Promise.resolve('local');
+    return Api.detectar().then(function (hay) {
+      if (!hay) { modo = 'local'; return 'local'; }
+      modo = 'servidor';
+      bd = vacia();
+      Remoto.alError(errorRemoto);
+      var listo = Api.token()
+        ? hidratarOClavePendiente().catch(function () { olvidarSesion(); })
+        : Promise.resolve();
+      return listo.then(function () {
+        Api.alCaducar(sesionInvalida);
+        return 'servidor';
+      });
+    });
+  }
+
+  function hidratar() {
+    return Api.pedir('GET', '/estado', undefined, { silencioso: true }).then(function (s) {
+      var nueva = vacia();
+      COLECCIONES.forEach(function (c) { nueva[c] = Array.isArray(s[c]) ? s[c] : []; });
+      nueva.vto = s.vto || {};
+      nueva.sesion = { usuarioId: s.usuario.id, desde: ahora() };
+      bd = nueva;
+      clavePendiente = false;
+      return s;
+    });
+  }
+
+  /* Una cuenta con la contraseña pendiente de cambio solo puede ver su
+     perfil: se consulta antes y el estado completo se carga solo si no hay
+     cambio pendiente (usuarioConocido evita repetir la consulta tras entrar) */
+  function hidratarOClavePendiente(usuarioConocido) {
+    var perfil = usuarioConocido
+      ? Promise.resolve(usuarioConocido)
+      : Api.pedir('GET', '/auth/yo', undefined, { silencioso: true }).then(function (r) { return r.usuario; });
+    return perfil.then(function (u) {
+      if (!u.debeCambiarClave) return hidratar();
+      bd = vacia();
+      bd.usuarios = [u];
+      bd.sesion = { usuarioId: u.id, desde: ahora() };
+      clavePendiente = true;
+    });
+  }
+
+  function olvidarSesion() {
+    Api.fijarToken(null);
+    bd = vacia();
+    clavePendiente = false;
+  }
+
+  function sesionInvalida(err) {
+    if (err.codigo === 'CLAVE_PENDIENTE') {
+      if (!clavePendiente) hidratarOClavePendiente().then(avisarCambio, avisarCambio);
+      return;
+    }
+    if (!haySesion()) return;
+    olvidarSesion();
+    if (window.Dialogo) Dialogo.avisar('Tu sesión terminó. Vuelve a entrar.', 'aviso');
+    location.hash = '#/entrar';
+    avisarCambio();
+  }
+
+  var rehidratando = null;
+  function errorRemoto(err, descripcion) {
+    if (err.estado === 401 || err.codigo === 'CLAVE_PENDIENTE') return;
+    if (window.Dialogo) {
+      Dialogo.avisar('No se guardó' + (descripcion ? ' «' + descripcion + '»' : '') + ': ' + err.message, 'error');
+    }
+    /* La copia en memoria ya no coincide con el servidor: se recarga */
+    if (rehidratando) return;
+    rehidratando = Remoto.esperar()
+      .then(hidratar)
+      .then(avisarCambio, function () {})
+      .then(function () { rehidratando = null; });
+  }
+
+  function avisarCambio() {
+    try { alCambiar(); } catch (e) { if (window.console) console.error(e); }
+  }
+
+  function etiqueta(obj) {
+    return obj && (obj.nombre || obj.titulo || obj.situacion || obj.texto) || '';
+  }
+
+  /* Tras la respuesta, la copia local adopta los valores del servidor */
+  function adoptar(coleccion, id) {
+    return function (respuesta) {
+      if (!respuesta || typeof respuesta !== 'object' || Array.isArray(respuesta)) return;
+      var obj = uno(coleccion, id);
+      if (!obj) return;
+      Object.keys(respuesta).forEach(function (k) {
+        if (CALCULADOS.indexOf(k) === -1) obj[k] = respuesta[k];
+      });
+    };
+  }
+
+  function rutaItem(coleccion, id) {
+    if (RUTA_ITEM.indexOf(coleccion) === -1) return null;
+    return '/' + coleccion + '/' + Api.c(id);
+  }
+
+  function remotoCrear(coleccion, obj) {
+    var ruta = null;
+    if (RUTA_PROYECTO.indexOf(coleccion) !== -1) ruta = '/proyectos/' + Api.c(obj.proyectoId) + '/' + coleccion;
+    else if (RUTA_GLOBAL.indexOf(coleccion) !== -1) ruta = '/' + coleccion;
+    else if (coleccion === 'programas') ruta = '/portafolios/' + Api.c(obj.portafolioId) + '/programas';
+    if (!ruta) {
+      if (window.console) console.warn('Gestor: «' + coleccion + '» no se crea con la ruta genérica');
+      return;
+    }
+    Remoto.enviar({
+      metodo: 'POST', ruta: ruta, cuerpo: copia(obj),
+      descripcion: etiqueta(obj), despues: adoptar(coleccion, obj.id)
+    });
+  }
+
+  function remotoActualizar(coleccion, id, cambios) {
+    var ruta = rutaItem(coleccion, id);
+    if (!ruta) {
+      if (window.console) console.warn('Gestor: «' + coleccion + '» no se actualiza con la ruta genérica');
+      return;
+    }
+    Remoto.enviar({
+      metodo: 'PATCH', ruta: ruta, cuerpo: copia(cambios), clave: 'PATCH ' + ruta, fusion: 'mezclar',
+      descripcion: etiqueta(uno(coleccion, id)), despues: adoptar(coleccion, id)
+    });
+  }
+
+  function remotoBorrar(coleccion, id, descripcion) {
+    var ruta = rutaItem(coleccion, id);
+    if (!ruta) return;
+    Remoto.enviar({ metodo: 'DELETE', ruta: ruta, descripcion: descripcion });
+  }
 
   /* ══════════════ CRUD genérico ══════════════ */
 
@@ -91,10 +263,14 @@ window.Gestor = (function () {
   }
 
   function uno(coleccion, id) {
-    return lista(coleccion).filter(function (x) { return x.id === id; })[0] || null;
+    var datos = cargar()[coleccion] || [];
+    for (var i = 0; i < datos.length; i++) if (datos[i].id === id) return datos[i];
+    return null;
   }
 
-  function crear(coleccion, datos) {
+  /* Las versiones «Local» solo tocan la copia en memoria: las usan las
+     operaciones compuestas, que hablan con su propia ruta de la API. */
+  function crearLocal(coleccion, datos) {
     var b = cargar();
     var obj = datos || {};
     obj.id = obj.id || nuevoId(coleccion.slice(0, 3));
@@ -104,7 +280,7 @@ window.Gestor = (function () {
     return obj;
   }
 
-  function actualizar(coleccion, id, cambios) {
+  function actualizarLocal(coleccion, id, cambios) {
     var obj = uno(coleccion, id);
     if (!obj) return null;
     Object.keys(cambios || {}).forEach(function (k) { obj[k] = cambios[k]; });
@@ -113,12 +289,37 @@ window.Gestor = (function () {
     return obj;
   }
 
-  function borrar(coleccion, id) {
+  function borrarLocal(coleccion, id) {
     var b = cargar();
     var antes = b[coleccion].length;
     b[coleccion] = b[coleccion].filter(function (x) { return x.id !== id; });
     guardar();
     return b[coleccion].length < antes;
+  }
+
+  function crear(coleccion, datos) {
+    var obj = crearLocal(coleccion, datos);
+    if (enServidor()) remotoCrear(coleccion, obj);
+    return obj;
+  }
+
+  function actualizar(coleccion, id, cambios) {
+    var obj = actualizarLocal(coleccion, id, cambios);
+    if (obj && enServidor()) remotoActualizar(coleccion, id, cambios);
+    return obj;
+  }
+
+  function borrar(coleccion, id) {
+    var previo = uno(coleccion, id);
+    var hecho = borrarLocal(coleccion, id);
+    if (hecho && enServidor()) remotoBorrar(coleccion, id, etiqueta(previo));
+    return hecho;
+  }
+
+  /* Añade a la copia en memoria algo que ya existe en el servidor */
+  function anotar(coleccion, obj) {
+    cargar()[coleccion].push(obj);
+    return obj;
   }
 
   /* ══════════════ Semilla inicial ══════════════ */
@@ -137,7 +338,18 @@ window.Gestor = (function () {
 
   /* ══════════════ Sesión y usuarios ══════════════ */
 
+  /* En modo servidor devuelve una promesa: { usuario, clavePendiente } o { error } */
   function entrar(correo, clave) {
+    if (enServidor()) {
+      return Api.pedir('POST', '/auth/entrar', { correo: correo, clave: clave })
+        .then(function (r) {
+          Api.fijarToken(r.token);
+          return hidratarOClavePendiente(r.usuario).then(function () {
+            return { usuario: r.usuario, clavePendiente: clavePendiente };
+          });
+        })
+        .catch(function (err) { return { error: err.message }; });
+    }
     var b = cargar();
     var u = b.usuarios.filter(function (x) {
       return x.correo.toLowerCase() === String(correo || '').trim().toLowerCase();
@@ -151,6 +363,12 @@ window.Gestor = (function () {
   }
 
   function salir() {
+    if (enServidor()) {
+      var t = Api.token();
+      var cierre = t ? Api.pedir('POST', '/auth/salir').catch(function () {}) : Promise.resolve();
+      olvidarSesion();
+      return cierre;
+    }
     var b = cargar();
     b.sesion = null;
     guardar();
@@ -162,11 +380,20 @@ window.Gestor = (function () {
     return uno('usuarios', b.sesion.usuarioId);
   }
 
-  function haySesion() { return !!usuarioActual(); }
+  function haySesion() {
+    if (enServidor() && (clavePendiente || !Api.token())) return false;
+    return !!usuarioActual();
+  }
 
   function esAdmin() {
     var u = usuarioActual();
     return !!u && u.rol === 'admin';
+  }
+
+  /* Crear proyectos y cambiar la estructura (portafolios, programas, EOS) */
+  function puedeGestionar() {
+    var u = usuarioActual();
+    return !!u && (u.rol === 'admin' || u.rol === 'director');
   }
 
   function crearUsuario(datos) {
@@ -178,20 +405,56 @@ window.Gestor = (function () {
     if (!datos.clave || datos.clave.length < 6) {
       return { error: 'La contraseña debe tener al menos 6 caracteres.' };
     }
-    var u = crear('usuarios', {
+    if (enServidor()) {
+      var u = crearLocal('usuarios', {
+        nombre: datos.nombre || correo, correo: correo,
+        rol: datos.rol || 'miembro', activo: true, debeCambiarClave: true
+      });
+      Remoto.enviar({
+        metodo: 'POST', ruta: '/usuarios', descripcion: u.nombre,
+        cuerpo: { id: u.id, nombre: u.nombre, correo: correo, clave: datos.clave, rol: u.rol },
+        despues: adoptar('usuarios', u.id)
+      });
+      return { usuario: u };
+    }
+    var nuevo = crear('usuarios', {
       nombre: datos.nombre || correo,
       correo: correo,
       clave: huella(datos.clave),
       rol: datos.rol || 'miembro',
       activo: true
     });
-    return { usuario: u };
+    return { usuario: nuevo };
   }
 
   function cambiarClave(usuarioId, nueva) {
     if (!nueva || nueva.length < 6) return { error: 'La contraseña debe tener al menos 6 caracteres.' };
+    if (enServidor()) {
+      var propia = (usuarioActual() || {}).id === usuarioId;
+      Remoto.enviar({
+        metodo: 'PUT', ruta: '/usuarios/' + Api.c(usuarioId) + '/clave', cuerpo: { clave: nueva },
+        descripcion: 'contraseña',
+        despues: function () { actualizarLocal('usuarios', usuarioId, { debeCambiarClave: !propia }); }
+      });
+      return { ok: true };
+    }
     actualizar('usuarios', usuarioId, { clave: huella(nueva) });
     return { ok: true };
+  }
+
+  /* La del propio usuario, conociendo la actual. Devuelve una promesa. */
+  function cambiarPropiaClave(actual, nueva) {
+    if (!nueva || nueva.length < 6) return Promise.resolve({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+    if (actual === nueva) return Promise.resolve({ error: 'La nueva contraseña debe ser distinta de la actual.' });
+    if (enServidor()) {
+      return Api.pedir('PUT', '/auth/clave', { actual: actual, nueva: nueva })
+        .then(function () { return hidratar(); })
+        .then(function () { return { ok: true }; }, function (err) { return { error: err.message }; });
+    }
+    var u = usuarioActual();
+    if (!u || u.clave !== huella(actual)) return Promise.resolve({ error: 'La contraseña actual no coincide.' });
+    actualizar('usuarios', u.id, { clave: huella(nueva) });
+    return Promise.resolve({ ok: true });
   }
 
   var ROLES = [
@@ -213,20 +476,32 @@ window.Gestor = (function () {
     var existente = lista('permisos').filter(function (p) {
       return p.usuarioId === usuarioId && p.ambito === ambito && p.refId === refId;
     })[0];
-    if (existente) return actualizar('permisos', existente.id, { nivel: nivel });
-    return crear('permisos', { usuarioId: usuarioId, ambito: ambito, refId: refId, nivel: nivel });
+    var perm = existente
+      ? actualizarLocal('permisos', existente.id, { nivel: nivel })
+      : crearLocal('permisos', { usuarioId: usuarioId, ambito: ambito, refId: refId, nivel: nivel });
+    if (enServidor()) {
+      Remoto.enviar({
+        metodo: 'POST', ruta: '/permisos', descripcion: 'permiso',
+        cuerpo: { id: perm.id, usuarioId: usuarioId, ambito: ambito, refId: refId, nivel: nivel },
+        despues: adoptar('permisos', perm.id)
+      });
+    }
+    return perm;
   }
 
   function revocar(permisoId) { return borrar('permisos', permisoId); }
 
   /* Nivel efectivo del usuario sobre un proyecto */
   function nivelEn(proyectoId, usuarioId) {
-    var u = usuarioId ? uno('usuarios', usuarioId) : usuarioActual();
+    var actual = usuarioActual();
+    var u = usuarioId ? uno('usuarios', usuarioId) : actual;
     if (!u) return 0;
     if (u.rol === 'admin') return NIVELES.dirigir;
 
     var p = uno('proyectos', proyectoId);
     if (!p) return 0;
+    /* En modo servidor, el nivel propio lo calcula la base de datos */
+    if (enServidor() && actual && u.id === actual.id && typeof p.nivel === 'number') return p.nivel;
     if (p.directorId === u.id) return NIVELES.dirigir;
 
     var max = 0;
@@ -252,7 +527,8 @@ window.Gestor = (function () {
   function proyectosVisibles() {
     var u = usuarioActual();
     if (!u) return [];
-    if (u.rol === 'admin') return lista('proyectos');
+    /* El servidor ya solo envía los visibles */
+    if (u.rol === 'admin' || enServidor()) return lista('proyectos');
     return lista('proyectos').filter(function (p) { return nivelEn(p.id) > 0; });
   }
 
@@ -263,12 +539,42 @@ window.Gestor = (function () {
            (PMBOK.metodologias || [])[0];
   }
 
+  /* En modo servidor devuelve una promesa con { proyecto } o { error } */
   function crearProyecto(datos) {
     var u = usuarioActual();
-    if (!u) return { error: 'No hay sesión iniciada.' };
-    if (!datos.nombre || !datos.nombre.trim()) return { error: 'El proyecto necesita un nombre.' };
+    if (!u) return resultado({ error: 'No hay sesión iniciada.' });
+    if (!datos.nombre || !datos.nombre.trim()) return resultado({ error: 'El proyecto necesita un nombre.' });
+    if (!puedeGestionar()) return resultado({ error: 'Tu rol no permite crear proyectos. Pídeselo a un director o administrador.' });
 
     var met = metodologia(datos.metodologia || 'predictivo');
+
+    if (enServidor()) {
+      var id = nuevoId('pro');
+      var cuerpo = {
+        id: id, nombre: datos.nombre.trim(), descripcion: datos.descripcion || '', metodologia: met.id,
+        portafolioId: datos.portafolioId || null, rocaId: datos.rocaId || null,
+        inicio: datos.inicio || null, fin: datos.fin || null,
+        presupuesto: datos.presupuesto === '' || datos.presupuesto == null ? null : datos.presupuesto,
+        moneda: datos.moneda || 'USD'
+      };
+      if (datos.programaId) cuerpo.programaId = datos.programaId;
+      return Remoto.enCola(function () { return Api.pedir('POST', '/proyectos', cuerpo); })
+        .then(function (p) {
+          return Promise.all([
+            Api.pedir('GET', '/proyectos/' + Api.c(id) + '/miembros'),
+            Api.pedir('GET', '/proyectos/' + Api.c(id) + '/sprints')
+          ]).then(function (r) {
+            delete p.progreso;
+            var b = cargar();
+            b.proyectos.push(p);
+            r[0].forEach(function (m) { b.miembros.push(m); });
+            r[1].forEach(function (s) { b.sprints.push(s); });
+            return { proyecto: p };
+          });
+        })
+        .catch(function (err) { return { error: err.message }; });
+    }
+
     var p = crear('proyectos', {
       nombre: datos.nombre.trim(),
       descripcion: datos.descripcion || '',
@@ -298,16 +604,40 @@ window.Gestor = (function () {
     return { proyecto: p };
   }
 
+  /* Las operaciones que en modo servidor esperan a la API devuelven promesa;
+     en modo local, el valor directo (como siempre) */
+  function resultado(valor) {
+    return enServidor() ? Promise.resolve(valor) : valor;
+  }
+
   function proyecto(id) { return uno('proyectos', id); }
 
+  var HIJAS_PROYECTO = ['procesos', 'documentos', 'archivos', 'riesgos', 'interesados', 'cambios', 'lecciones',
+    'tareas', 'sprints', 'mediciones', 'comentarios', 'miembros'];
+
   function borrarProyecto(id) {
-    ['procesos', 'documentos', 'archivos', 'riesgos', 'interesados', 'cambios', 'lecciones',
-     'tareas', 'sprints', 'mediciones', 'comentarios', 'miembros'].forEach(function (c) {
+    var previo = proyecto(id);
+    HIJAS_PROYECTO.forEach(function (c) {
       var b = cargar();
       b[c] = b[c].filter(function (x) { return x.proyectoId !== id; });
     });
-    borrar('proyectos', id);
+    borrarLocal('proyectos', id);
     guardar();
+    if (enServidor()) remotoBorrar('proyectos', id, etiqueta(previo));
+  }
+
+  /* Al borrar un portafolio sus proyectos quedan sin portafolio y sus
+     programas desaparecen (el servidor hace lo mismo en cascada) */
+  function borrarPortafolio(id) {
+    var previo = uno('portafolios', id);
+    var programas = lista('programas', { portafolioId: id }).map(function (x) { return x.id; });
+    lista('proyectos').forEach(function (p) {
+      if (p.portafolioId === id) p.portafolioId = null;
+      if (programas.indexOf(p.programaId) !== -1) p.programaId = null;
+    });
+    programas.forEach(function (pid) { borrarLocal('programas', pid); });
+    borrarLocal('portafolios', id);
+    if (enServidor()) remotoBorrar('portafolios', id, etiqueta(previo));
   }
 
   /* ── Estado de los 40 procesos ─────────────────────────── */
@@ -323,10 +653,28 @@ window.Gestor = (function () {
     var e = lista('procesos', { proyectoId: proyectoId }).filter(function (x) {
       return x.procesoId === procesoId;
     })[0];
-    if (e) return actualizar('procesos', e.id, cambios);
-    var base = { proyectoId: proyectoId, procesoId: procesoId, estado: 'pendiente', notas: '' };
-    Object.keys(cambios || {}).forEach(function (k) { base[k] = cambios[k]; });
-    return crear('procesos', base);
+    var resultadoLocal;
+    if (e) {
+      resultadoLocal = actualizarLocal('procesos', e.id, cambios);
+    } else {
+      var base = { proyectoId: proyectoId, procesoId: procesoId, estado: 'pendiente', notas: '' };
+      Object.keys(cambios || {}).forEach(function (k) { base[k] = cambios[k]; });
+      resultadoLocal = crearLocal('procesos', base);
+    }
+    if (enServidor()) {
+      var cuerpo = {};
+      if (cambios.estado !== undefined) cuerpo.estado = cambios.estado;
+      if (cambios.notas !== undefined) cuerpo.notas = cambios.notas;
+      var ruta = '/proyectos/' + Api.c(proyectoId) + '/procesos/' + Api.c(procesoId);
+      Remoto.enviar({
+        metodo: 'PUT', ruta: ruta, cuerpo: cuerpo, clave: 'PUT ' + ruta, fusion: 'mezclar',
+        descripcion: 'proceso',
+        despues: function (r) {
+          if (r && r.fecha !== undefined) actualizarLocal('procesos', resultadoLocal.id, { fecha: r.fecha });
+        }
+      });
+    }
+    return resultadoLocal;
   }
 
   /* Banda efectiva: la del flujo, salvo que el proyecto la haya movido */
@@ -342,7 +690,13 @@ window.Gestor = (function () {
     if (!p) return;
     if (!p.orden) p.orden = {};
     p.orden[procesoId] = banda;
-    actualizar('proyectos', proyectoId, { orden: p.orden });
+    actualizarLocal('proyectos', proyectoId, { orden: p.orden });
+    if (enServidor()) {
+      Remoto.enviar({
+        metodo: 'PUT', ruta: '/proyectos/' + Api.c(proyectoId) + '/procesos/' + Api.c(procesoId) + '/banda',
+        cuerpo: { banda: banda }, descripcion: 'orden del flujo'
+      });
+    }
   }
 
   function procesosDeBanda(proyectoId, banda) {
@@ -415,7 +769,7 @@ window.Gestor = (function () {
     var existente = documentoDe(proyectoId, artefactoId);
     if (existente) return { documento: existente, yaExistia: true };
 
-    var doc = crear('documentos', {
+    var doc = crearLocal('documentos', {
       proyectoId: proyectoId,
       artefactoId: artefactoId,
       nombre: art.nombre,
@@ -426,6 +780,23 @@ window.Gestor = (function () {
       contenido: {},
       autorId: (usuarioActual() || {}).id || null
     });
+    if (enServidor()) {
+      Remoto.enviar({
+        metodo: 'POST', ruta: '/proyectos/' + Api.c(proyectoId) + '/documentos', descripcion: art.nombre,
+        cuerpo: { id: doc.id, artefactoId: artefactoId, procesoId: procesoId || null },
+        despues: function (r) {
+          /* Otra persona lo generó a la vez: vale el suyo */
+          if (!r || !r.documento) return;
+          if (r.documento.id !== doc.id) {
+            errorRemoto(new Error('el documento ya existía y se ha recargado'), art.nombre);
+            return;
+          }
+          var recibido = copia(r.documento);
+          delete recibido.descripcion;   /* es la del artefacto, no un campo del documento */
+          adoptar('documentos', doc.id)(recibido);
+        }
+      });
+    }
     return { documento: doc };
   }
 
@@ -434,7 +805,14 @@ window.Gestor = (function () {
     if (!d) return false;
     if (!d.contenido) d.contenido = {};
     d.contenido[indice] = valor;
-    actualizar('documentos', documentoId, { contenido: d.contenido });
+    actualizarLocal('documentos', documentoId, { contenido: d.contenido });
+    if (enServidor()) {
+      var ruta = '/documentos/' + Api.c(documentoId) + '/bloques/' + Api.c(indice);
+      Remoto.enviar({
+        metodo: 'PUT', ruta: ruta, cuerpo: { valor: valor }, clave: 'PUT ' + ruta,
+        descripcion: d.nombre
+      });
+    }
     return true;
   }
 
@@ -443,13 +821,27 @@ window.Gestor = (function () {
     if (!d) return null;
     var cambios = { estado: estado };
     if (estado === 'aprobado') cambios.aprobado = ahora();
-    return actualizar('documentos', documentoId, cambios);
+    var r = actualizarLocal('documentos', documentoId, cambios);
+    if (enServidor()) {
+      Remoto.enviar({
+        metodo: 'PATCH', ruta: '/documentos/' + Api.c(documentoId), cuerpo: { estado: estado },
+        descripcion: d.nombre, despues: adoptar('documentos', documentoId)
+      });
+    }
+    return r;
   }
 
   function nuevaVersion(documentoId) {
     var d = uno('documentos', documentoId);
     if (!d) return null;
-    return actualizar('documentos', documentoId, { version: (d.version || 1) + 1, estado: 'borrador' });
+    var r = actualizarLocal('documentos', documentoId, { version: (d.version || 1) + 1, estado: 'borrador' });
+    if (enServidor()) {
+      Remoto.enviar({
+        metodo: 'POST', ruta: '/documentos/' + Api.c(documentoId) + '/versiones',
+        descripcion: d.nombre, despues: adoptar('documentos', documentoId)
+      });
+    }
+    return r;
   }
 
   /* Cuántos bloques de la plantilla están rellenados */
@@ -571,17 +963,33 @@ window.Gestor = (function () {
     var tareas = tareasDe(s.proyectoId, { sprintId: sprintId });
     var entregado = tareas.filter(function (t) { return t.estado === 'hecho'; })
       .reduce(function (n, t) { return n + (Number(t.puntos) || 0); }, 0);
-    actualizar('sprints', sprintId, { estado: 'cerrado', entregado: entregado, cierre: ahora() });
+    actualizarLocal('sprints', sprintId, { estado: 'cerrado', entregado: entregado, cierre: ahora() });
 
     // Lo no terminado vuelve al backlog
-    tareas.filter(function (t) { return t.estado !== 'hecho'; })
-      .forEach(function (t) { actualizar('tareas', t.id, { sprintId: null, estado: 'backlog' }); });
+    var devueltas = tareas.filter(function (t) { return t.estado !== 'hecho'; });
+    devueltas.forEach(function (t) { actualizarLocal('tareas', t.id, { sprintId: null, estado: 'backlog' }); });
 
-    return { entregado: entregado, devueltas: tareas.filter(function (t) { return t.estado !== 'hecho'; }).length };
+    if (enServidor()) {
+      var pid = s.proyectoId;
+      Remoto.enviar({
+        metodo: 'POST', ruta: '/sprints/' + Api.c(sprintId) + '/cerrar', descripcion: s.nombre,
+        despues: function (r) {
+          if (r && r.sprint) adoptar('sprints', sprintId)(r.sprint);
+          /* Lo que el servidor devolvió al backlog, tal cual quedó */
+          return Api.pedir('GET', '/proyectos/' + Api.c(pid) + '/tareas').then(function (lista2) {
+            var b = cargar();
+            b.tareas = b.tareas.filter(function (t) { return t.proyectoId !== pid; }).concat(lista2);
+          }, function () {});
+        }
+      });
+    }
+    return { entregado: entregado, devueltas: devueltas.length };
   }
 
   /* Fotografía diaria de los puntos pendientes del sprint. Es lo que permite
-     dibujar un burndown real en lugar de una línea recta inventada. */
+     dibujar un burndown real en lugar de una línea recta inventada.
+     En modo servidor la API la toma sola con cada cambio de tareas;
+     aquí solo se refleja en la copia en memoria. */
   function hoyISO() {
     var d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -597,7 +1005,7 @@ window.Gestor = (function () {
     var historial = s.historial || {};
     historial[hoyISO()] = { restante: restante, comprometido: comprometido };
     if (!s.inicio) s.inicio = hoyISO();
-    actualizar('sprints', sprintId, { historial: historial, inicio: s.inicio });
+    actualizarLocal('sprints', sprintId, { historial: historial, inicio: s.inicio });
     return historial;
   }
 
@@ -694,8 +1102,14 @@ window.Gestor = (function () {
   function fijarVto(bloqueId, texto) {
     var b = cargar();
     if (!b.vto) b.vto = {};
+    if ((b.vto[bloqueId] || '') === (texto && texto.trim() ? texto : '')) return true;
     if (texto && texto.trim()) b.vto[bloqueId] = texto;
     else delete b.vto[bloqueId];
+    if (enServidor()) {
+      var ruta = '/vto/' + Api.c(bloqueId);
+      Remoto.enviar({ metodo: 'PUT', ruta: ruta, cuerpo: { texto: texto || '' }, clave: 'PUT ' + ruta, descripcion: 'VTO' });
+      return true;
+    }
     return guardar();
   }
 
@@ -705,23 +1119,37 @@ window.Gestor = (function () {
 
   /* ══════════════ Exportar / importar ══════════════ */
 
+  /* En modo servidor, exportar e importar devuelven promesas */
   function exportarTodo() {
-    var b = cargar();
-    var copia = JSON.parse(JSON.stringify(b));
-    copia.sesion = null;
-    copia.usuarios = copia.usuarios.map(function (u) {
-      var c = JSON.parse(JSON.stringify(u));
-      delete c.clave;
-      return c;
+    if (enServidor()) {
+      return Remoto.esperar().then(function () { return Api.pedir('GET', '/datos/exportar'); });
+    }
+    return exportarLocal(cargar());
+  }
+
+  function exportarLocal(base) {
+    var c = copia(base);
+    c.sesion = null;
+    c.usuarios = (c.usuarios || []).map(function (u) {
+      delete u.clave;
+      return u;
     });
-    copia.formato = 'pmbok8-gestor';
-    copia.exportado = new Date().toISOString();
-    return copia;
+    c.formato = 'pmbok8-gestor';
+    c.exportado = new Date().toISOString();
+    return c;
   }
 
   function importarTodo(datos) {
     if (!datos || datos.formato !== 'pmbok8-gestor') {
-      return { error: 'El archivo no es una exportación del gestor.' };
+      return resultado({ error: 'El archivo no es una exportación del gestor.' });
+    }
+    if (enServidor()) {
+      return Remoto.esperar()
+        .then(function () { return Api.pedir('POST', '/datos/importar', datos); })
+        .then(function (r) {
+          return hidratarOClavePendiente().then(function () { r.ok = true; return r; });
+        })
+        .catch(function (err) { return { error: err.message }; });
     }
     var actuales = cargar();
     var mapa = {};
@@ -738,18 +1166,94 @@ window.Gestor = (function () {
     return { ok: true };
   }
 
+  /* ══════════════ Del navegador al servidor ══════════════ */
+
+  function baseDelNavegador() {
+    try {
+      var crudo = localStorage.getItem(CLAVE);
+      return crudo ? JSON.parse(crudo) : null;
+    } catch (e) { return null; }
+  }
+
+  /* Resumen de lo guardado en este navegador, o null si no hay nada que llevar */
+  function datosDelNavegador() {
+    var b = baseDelNavegador();
+    if (!b) return null;
+    var cuenta = function (c) { return Array.isArray(b[c]) ? b[c].length : 0; };
+    var r = {
+      proyectos: cuenta('proyectos'), documentos: cuenta('documentos'), archivos: cuenta('archivos'),
+      usuarios: cuenta('usuarios'), portafolios: cuenta('portafolios'), rocas: cuenta('rocas')
+    };
+    var hayAlgo = r.proyectos || r.documentos || r.portafolios || r.rocas || r.usuarios > 1;
+    return hayAlgo ? r : null;
+  }
+
+  /* Reemplaza los datos del servidor por los del navegador y sube sus
+     archivos. progreso(texto) informa del avance. Devuelve una promesa. */
+  function llevarNavegadorAlServidor(progreso) {
+    var avisar = progreso || function () {};
+    var b = baseDelNavegador();
+    if (!enServidor() || !b) return Promise.resolve({ error: 'No hay datos del navegador que llevar.' });
+    var exportacion = exportarLocal(b);
+    var archivos = (b.archivos || []).slice();
+
+    avisar('Importando los datos…');
+    return Remoto.esperar()
+      .then(function () { return Api.pedir('POST', '/datos/importar', exportacion); })
+      .then(function (r) {
+        var subidos = 0, fallidos = [];
+        var cadena = Promise.resolve();
+        archivos.forEach(function (meta, i) {
+          cadena = cadena.then(function () {
+            avisar('Subiendo archivo ' + (i + 1) + ' de ' + archivos.length + '…');
+            return Archivos.leerLocal(meta).then(function (blob) {
+              var f = new FormData();
+              f.append('id', meta.id);
+              f.append('nombre', meta.nombre);
+              f.append('categoria', meta.categoria || 'general');
+              f.append('archivo', blob, meta.nombre);
+              return Api.pedir('POST', '/proyectos/' + Api.c(meta.proyectoId) + '/archivos', f);
+            }).then(function () { subidos++; }, function (err) {
+              fallidos.push(meta.nombre + ': ' + (err && err.message ? err.message : err));
+            });
+          });
+        });
+        return cadena.then(function () {
+          r.archivosSubidos = subidos;
+          r.archivosFallidos = fallidos;
+          return hidratarOClavePendiente().then(function () { return r; });
+        });
+      })
+      .catch(function (err) { return { error: err.message }; });
+  }
+
+  function mostrarCuentaInicial() {
+    if (enServidor()) {
+      var s = Api.salud();
+      return !!(s && s.primerUso);
+    }
+    return lista('usuarios').length === 1;
+  }
+
   return {
+    /* modo */
+    iniciar: iniciar, enServidor: enServidor, hidratar: hidratar,
+    clavePendiente: function () { return clavePendiente; },
+    alCambiar: function (fn) { alCambiar = fn || function () {}; },
     /* persistencia */
     cargar: cargar, guardar: guardar, reiniciarTodo: reiniciarTodo, nuevoId: nuevoId,
-    lista: lista, uno: uno, crear: crear, actualizar: actualizar, borrar: borrar,
+    lista: lista, uno: uno, crear: crear, actualizar: actualizar, borrar: borrar, anotar: anotar,
     /* sesión */
     entrar: entrar, salir: salir, usuarioActual: usuarioActual, haySesion: haySesion,
-    esAdmin: esAdmin, crearUsuario: crearUsuario, cambiarClave: cambiarClave, roles: ROLES,
+    esAdmin: esAdmin, puedeGestionar: puedeGestionar, crearUsuario: crearUsuario,
+    cambiarClave: cambiarClave, cambiarPropiaClave: cambiarPropiaClave, roles: ROLES,
+    mostrarCuentaInicial: mostrarCuentaInicial,
     /* permisos */
     permisosDe: permisosDe, conceder: conceder, revocar: revocar,
     nivelEn: nivelEn, puede: puede, proyectosVisibles: proyectosVisibles,
     /* proyectos */
     crearProyecto: crearProyecto, proyecto: proyecto, borrarProyecto: borrarProyecto,
+    borrarPortafolio: borrarPortafolio,
     metodologia: metodologia, progreso: progreso, siguienteProceso: siguienteProceso,
     estadoProceso: estadoProceso, fijarEstadoProceso: fijarEstadoProceso,
     bandaDe: bandaDe, moverProceso: moverProceso, procesosDeBanda: procesosDeBanda,
@@ -773,6 +1277,7 @@ window.Gestor = (function () {
     /* eos */
     rocasDe: rocasDe, vto: vto, fijarVto: fijarVto, asientosHijos: asientosHijos,
     /* datos */
-    exportarTodo: exportarTodo, importarTodo: importarTodo
+    exportarTodo: exportarTodo, importarTodo: importarTodo,
+    datosDelNavegador: datosDelNavegador, llevarNavegadorAlServidor: llevarNavegadorAlServidor
   };
 })();
