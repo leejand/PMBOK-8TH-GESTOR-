@@ -17,7 +17,8 @@
     "test": "node --test --test-concurrency=1 --test-reporter=spec \"tests/aceptacion/*.test.js\"",
     "bd:iniciar": "scripts\\postgres.cmd iniciar",
     "bd:detener": "scripts\\postgres.cmd detener",
-    "bd:estado": "scripts\\postgres.cmd estado"
+    "bd:estado": "scripts\\postgres.cmd estado",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -28,5 +29,8 @@
     "multer": "^2.4.0",
     "pg": "^8.23.0",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }
