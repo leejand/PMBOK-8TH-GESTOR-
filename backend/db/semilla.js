@@ -20,9 +20,10 @@ async function sembrar(cx) {
   let adminCreado = false;
   if (!hayAdmin) {
     const hash = await bcrypt.hash(config.admin.clave, 10);
+    /* La contraseña inicial es conocida: hay que cambiarla al entrar */
     await db.consulta(
-      `INSERT INTO usuarios (id, nombre, correo, clave_hash, rol)
-       VALUES ('u-admin', $1, $2, $3, 'admin')
+      `INSERT INTO usuarios (id, nombre, correo, clave_hash, rol, debe_cambiar_clave)
+       VALUES ('u-admin', $1, $2, $3, 'admin', true)
        ON CONFLICT (correo) DO UPDATE SET rol = 'admin', activo = true`,
       [config.admin.nombre, config.admin.correo, hash], cx);
     adminCreado = true;

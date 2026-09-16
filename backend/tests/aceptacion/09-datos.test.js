@@ -124,15 +124,24 @@ describe('HU-09 Exportar, importar y reiniciar', () => {
     assert.equal((await e.admin.get('/api/auth/yo')).estado, 200);
   });
 
-  it('CA-03 las contraseñas: se conservan las existentes y las nuevas reciben una provisional', async () => {
-    assert.equal((await e.anonimo.post('/api/auth/entrar', ADMIN)).estado, 200);
+  it('CA-03 las contraseñas: se conservan las existentes y las nuevas reciben una provisional que hay que cambiar', async () => {
+    const admin = await e.anonimo.post('/api/auth/entrar', ADMIN);
+    assert.equal(admin.estado, 200);
+    assert.equal(admin.datos.usuario.debeCambiarClave, false, 'la cuenta existente conserva su estado');
+
     const ana = await e.entrar('ana@empresa.co', 'cambiar123');
     assert.equal(ana.usuario.id, 'usu-ana-1');
     assert.equal(ana.usuario.nombre, 'Ana Pérez');
+    assert.equal(ana.usuario.debeCambiarClave, true);
+    const bloqueada = await ana.get('/api/proyectos/pro-lx1-1');
+    assert.equal(bloqueada.estado, 403);
+    assert.equal(bloqueada.datos.codigo, 'CLAVE_PENDIENTE');
+    assert.equal((await ana.put('/api/auth/clave', { actual: 'cambiar123', nueva: 'ana-segura-1' })).estado, 200);
+    assert.equal((await ana.get('/api/proyectos/pro-lx1-1')).estado, 200);
   });
 
   it('CA-04 el proyecto importado conserva estructura, cálculo y relaciones', async () => {
-    const ana = await e.entrar('ana@empresa.co', 'cambiar123');
+    const ana = await e.entrar('ana@empresa.co', 'ana-segura-1');
     const p = (await ana.get('/api/proyectos/pro-lx1-1')).datos;
     assert.equal(p.nivel, 3);
     assert.equal(p.creado, T0);
@@ -181,13 +190,24 @@ describe('HU-09 Exportar, importar y reiniciar', () => {
     const reinicio = await e.admin.post('/api/datos/reiniciar', { confirmacion: 'eliminar' });
     assert.equal(reinicio.estado, 200);
     assert.equal(reinicio.datos.sesionConservada, true);
+
+    /* Tras reiniciar vuelve la contraseña inicial, así que hay que cambiarla otra vez */
+    const pendiente = await e.admin.get('/api/proyectos');
+    assert.equal(pendiente.estado, 403);
+    assert.equal(pendiente.datos.codigo, 'CLAVE_PENDIENTE');
+    assert.equal((await e.admin.put('/api/auth/clave', { actual: ADMIN.clave, nueva: 'admin-nueva-1' })).estado, 200);
     assert.deepEqual((await e.admin.get('/api/proyectos')).datos, []);
 
     const imp = await e.admin.post('/api/datos/importar', antes);
     assert.equal(imp.estado, 200);
     const despues = (await e.admin.get('/api/datos/exportar')).datos;
 
-    const sinMarcas = (lista) => lista.map((x) => { const c = { ...x }; delete c.actualizado; return c; });
+    const sinMarcas = (lista) => lista.map((x) => {
+      const c = { ...x };
+      delete c.actualizado;
+      delete c.debeCambiarClave;
+      return c;
+    });
     for (const c of ['usuarios', 'proyectos', 'procesos', 'documentos', 'riesgos', 'tareas', 'sprints', 'metricas', 'asientos', 'permisos', 'miembros', 'rocas']) {
       assert.deepEqual(sinMarcas(despues[c]), sinMarcas(antes[c]), 'difiere la colección ' + c);
     }
@@ -208,11 +228,18 @@ describe('HU-09 Exportar, importar y reiniciar', () => {
   it('CA-07 reiniciar exige escribir ELIMINAR y deja solo la cuenta inicial', async () => {
     assert.equal((await e.admin.post('/api/datos/reiniciar', {})).estado, 400);
     assert.equal((await e.admin.post('/api/datos/reiniciar', { confirmacion: 'si' })).estado, 400);
+    /* Tras el reinicio y la reimportación de CA-05, Ana vuelve a ser una cuenta nueva */
     const ana = await e.entrar('ana@empresa.co', 'cambiar123');
-    assert.equal((await ana.post('/api/datos/reiniciar', { confirmacion: 'ELIMINAR' })).estado, 403);
+    assert.equal((await ana.put('/api/auth/clave', { actual: 'cambiar123', nueva: 'ana-segura-2' })).estado, 200);
+    const intento = await ana.post('/api/datos/reiniciar', { confirmacion: 'ELIMINAR' });
+    assert.equal(intento.estado, 403);
+    assert.equal(intento.datos.codigo, 'PROHIBIDO', 'rechazada por su rol, no por la contraseña');
 
     const r = await e.admin.post('/api/datos/reiniciar', { confirmacion: 'ELIMINAR' });
     assert.equal(r.estado, 200);
+    const yo = (await e.admin.get('/api/auth/yo')).datos.usuario;
+    assert.equal(yo.debeCambiarClave, true, 'la cuenta inicial vuelve con su contraseña por defecto');
+    await e.yaCambioSuClave('u-admin');
     const usuarios = (await e.admin.get('/api/usuarios')).datos;
     assert.deepEqual(usuarios.map((u) => u.correo), ['admin@pmbok.local']);
     assert.equal((await ana.get('/api/auth/yo')).estado, 401);

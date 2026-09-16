@@ -11,6 +11,7 @@ const db = require('./db');
 const { migrar } = require('../db/migrar');
 const { sembrar } = require('../db/semilla');
 const { crearApp } = require('./app');
+const sesiones = require('./servicios/sesiones');
 
 /* Por defecto solo el propio equipo, en IPv4 y en IPv6: «localhost»
    resuelve a ::1 en muchos clientes de Windows */
@@ -31,6 +32,12 @@ async function arrancar() {
   const s = await db.transaccion((cx) => sembrar(cx));
   console.log('[bd] catálogo: ' + s.procesos + ' procesos, ' + s.artefactos + ' artefactos' +
     (s.adminCreado ? ' · administrador creado (' + config.admin.correo + ')' : ''));
+
+  const purgar = () => sesiones.purgar()
+    .then((n) => { if (n) console.log('[bd] sesiones caducadas eliminadas: ' + n); })
+    .catch((err) => console.error('[bd] no se pudieron purgar las sesiones:', err.message));
+  await purgar();
+  setInterval(purgar, 60 * 60 * 1000).unref();
 
   const app = crearApp();
   const servidores = [];
@@ -69,7 +76,8 @@ arrancar().catch((err) => {
   } else if (err.code === 'ECONNREFUSED') {
     console.error('      ¿Está PostgreSQL en marcha en ' + config.bd.host + ':' + config.bd.port + '?');
   } else if (err.code === '28P01') {
-    console.error('      La contraseña de PGPASSWORD en backend/.env no es la del usuario ' + config.bd.user + '.');
+    console.error('      Una contraseña de backend/.env no coincide: PGADMIN_PASSWORD (' + config.bdAdmin.user +
+      ') o PGPASSWORD (' + config.bd.user + ').');
   }
   process.exit(1);
 });

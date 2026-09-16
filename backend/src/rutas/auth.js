@@ -8,7 +8,7 @@ const express = require('express');
 const sesiones = require('../servicios/sesiones');
 const D = require('../definiciones');
 const { z, validar } = require('../validacion');
-const { requerirSesion } = require('../middleware/auth');
+const { requerirSesionAunConClavePendiente: requerirSesion } = require('../middleware/auth');
 
 const r = express.Router();
 

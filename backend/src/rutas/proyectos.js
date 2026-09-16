@@ -134,13 +134,17 @@ r.get(P + '/documentos', async (req, res) => {
   res.json(await docs.listar(req.params.proyectoId));
 });
 
-const esquemaGenerar = z.object({ artefactoId: esquemaId, procesoId: esquemaId.nullable().optional() });
+const esquemaGenerar = z.object({
+  id: esquemaId.optional(),
+  artefactoId: esquemaId,
+  procesoId: esquemaId.nullable().optional()
+});
 
 r.post(P + '/documentos', async (req, res) => {
   const pid = req.params.proyectoId;
   await exigirProyecto(req.usuario, pid, 'editar');
   const d = validar(esquemaGenerar, req.body);
-  const resultado = await docs.generar(pid, d.artefactoId, d.procesoId, req.usuario.id);
+  const resultado = await docs.generar(pid, d.artefactoId, d.procesoId, req.usuario.id, d.id);
   res.status(resultado.yaExistia ? 200 : 201).json(resultado);
 });
 
@@ -172,10 +176,12 @@ r.post(P + '/archivos',
     if (!nombre) throw peticionInvalida('El archivo necesita un nombre.');
     const categoria = String((req.body && req.body.categoria) || 'general').trim().slice(0, 80) || 'general';
     const tipo = TIPO_MIME.test(req.file.mimetype || '') ? req.file.mimetype.toLowerCase() : 'application/octet-stream';
+    /* Al migrar desde el navegador el archivo conserva su identificador */
+    const id = req.body && req.body.id ? validar(esquemaId, req.body.id) : undefined;
 
     const archivo = await db.transaccion(async (cx) => {
       const a = await repo.insertar(D.archivos, {
-        proyectoId: req.params.proyectoId, nombre, tipo, tamano: req.file.size,
+        id, proyectoId: req.params.proyectoId, nombre, tipo, tamano: req.file.size,
         categoria, autorId: req.usuario.id, almacen: 'bd'
       }, cx);
       await db.consulta('INSERT INTO archivo_contenidos (archivo_id, datos) VALUES ($1, $2)', [a.id, req.file.buffer], cx);

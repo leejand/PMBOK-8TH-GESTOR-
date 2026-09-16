@@ -35,20 +35,34 @@ if (!/^[a-z_][a-z0-9_]{0,62}$/.test(nombreBd)) {
   throw new Error('PGDATABASE solo admite minúsculas, dígitos y guion bajo: ' + nombreBd);
 }
 
+const bd = {
+  host: process.env.PGHOST || 'localhost',
+  port: entero(process.env.PGPORT, 5432),
+  user: process.env.PGUSER || 'postgres',
+  password: process.env.PGPASSWORD || '',
+  database: nombreBd,
+  max: entero(process.env.PGPOOL_MAX, 10),
+  application_name: 'pmbok8-backend'
+};
+
+/* La API trabaja con una cuenta de permisos mínimos (PGUSER). Crear la
+   base, el rol y aplicar migraciones lo hace la cuenta administradora
+   (PGADMIN_USER); si no se indica, se usa la misma de la API. */
+const bdAdmin = {
+  ...bd,
+  user: process.env.PGADMIN_USER || bd.user,
+  password: process.env.PGADMIN_USER ? (process.env.PGADMIN_PASSWORD || '') : bd.password,
+  max: 2,
+  application_name: 'pmbok8-migraciones'
+};
+
 module.exports = {
   raiz: RAIZ,
   entorno: process.env.NODE_ENV || 'development',
   puerto: entero(process.env.PORT, 3000),
 
-  bd: {
-    host: process.env.PGHOST || 'localhost',
-    port: entero(process.env.PGPORT, 5432),
-    user: process.env.PGUSER || 'postgres',
-    password: process.env.PGPASSWORD || '',
-    database: nombreBd,
-    max: entero(process.env.PGPOOL_MAX, 10),
-    application_name: 'pmbok8-backend'
-  },
+  bd,
+  bdAdmin,
 
   jwt: {
     secreto: secreto,

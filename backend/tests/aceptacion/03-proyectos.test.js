@@ -87,11 +87,12 @@ describe('HU-03 Proyectos', () => {
     assert.equal(mal.estado, 400);
     assert.match(mal.datos.error, /no pertenece/);
 
+    const incoherente = await dir.patch('/api/proyectos/' + p.datos.id, { portafolioId: pf2.id, programaId: prog.id });
+    assert.equal(incoherente.estado, 400, 'no puede quedar en un programa de otro portafolio');
     const mover = await dir.patch('/api/proyectos/' + p.datos.id, { portafolioId: pf2.id });
-    assert.equal(mover.estado, 400, 'no se puede sacar del portafolio sin quitar el programa');
-    const ok = await dir.patch('/api/proyectos/' + p.datos.id, { portafolioId: pf2.id, programaId: null });
-    assert.equal(ok.estado, 200);
-    assert.equal(ok.datos.portafolioId, pf2.id);
+    assert.equal(mover.estado, 200, 'mover de portafolio desde la fila lo saca de su programa');
+    assert.equal(mover.datos.portafolioId, pf2.id);
+    assert.equal(mover.datos.programaId, null);
   });
 
   it('CA-06 un miembro del equipo edita hitos y DoD, pero la configuración es del líder', async () => {

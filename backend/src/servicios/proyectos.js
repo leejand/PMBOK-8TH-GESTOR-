@@ -30,6 +30,13 @@ async function coherenciaCartera(datos, actual, cx) {
   if (!programaId) return;
   const prog = await db.uno('SELECT portafolio_id FROM programas WHERE id = $1', [programaId], cx);
   if (!prog) throw peticionInvalida('El programa indicado no existe.');
+  /* Mover el proyecto a otro portafolio (como hace la fila del listado)
+     lo saca del programa, que pertenece al portafolio anterior */
+  if (actual && datos.programaId === undefined && datos.portafolioId !== undefined &&
+      datos.portafolioId !== prog.portafolio_id) {
+    datos.programaId = null;
+    return;
+  }
   const portafolioId = datos.portafolioId !== undefined ? datos.portafolioId : actual && actual.portafolioId;
   if (datos.programaId !== undefined && datos.portafolioId === undefined) {
     datos.portafolioId = prog.portafolio_id;

@@ -12,6 +12,7 @@ const D = require('../definiciones');
 const catalogo = require('../catalogo');
 const svc = require('../servicios/proyectos');
 const datos = require('../servicios/datos');
+const estado = require('../servicios/estado');
 const { z, validar, limpiar } = require('../validacion');
 const { requerirGestion, requerirRol } = require('../middleware/auth');
 const { recursoGlobal } = require('./recursos');
@@ -111,6 +112,11 @@ vto.put('/:bloqueId', requerirGestion, async (req, res) => {
 /* ══════════════ Panel y agenda ══════════════ */
 
 const general = express.Router();
+
+/* Todo lo visible para quien pregunta, con la forma de la base del navegador */
+general.get('/estado', async (req, res) => {
+  res.json(await estado.estado(req.usuario));
+});
 
 general.get('/panel', async (req, res) => {
   res.json(await svc.panel(req.usuario));

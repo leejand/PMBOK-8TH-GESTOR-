@@ -41,12 +41,14 @@ usuarios.get('/:id', async (req, res) => {
   res.json(u);
 });
 
+/* Quien crea la cuenta conoce la contraseña: su dueño la cambia al entrar */
 usuarios.post('/', soloAdmin, async (req, res) => {
   const d = validar(D.usuarios.esquemas.crear, req.body);
   const hash = await sesiones.hashear(d.clave);
   const fila = await db.uno(
-    'INSERT INTO usuarios (nombre, correo, clave_hash, rol) VALUES ($1, $2, $3, $4) RETURNING id',
-    [(d.nombre || '').trim() || d.correo, d.correo, hash, d.rol || 'miembro']);
+    `INSERT INTO usuarios (id, nombre, correo, clave_hash, rol, debe_cambiar_clave)
+     VALUES (COALESCE($1, gen_random_uuid()::text), $2, $3, $4, $5, true) RETURNING id`,
+    [d.id || null, (d.nombre || '').trim() || d.correo, d.correo, hash, d.rol || 'miembro']);
   res.status(201).json(await repo.obtener(D.usuarios, fila.id));
 });
 
@@ -80,13 +82,15 @@ usuarios.patch('/:id', soloAdmin, async (req, res) => {
 
 usuarios.put('/:id/clave', soloAdmin, async (req, res) => {
   const { clave } = validar(z.object({ clave: D.clave }), req.body);
+  const propia = req.params.id === req.usuario.id;
   await db.transaccion(async (cx) => {
-    const r = await db.consulta('UPDATE usuarios SET clave_hash = $2 WHERE id = $1',
-      [req.params.id, await sesiones.hashear(clave)], cx);
+    /* Una contraseña puesta por un administrador la cambia luego su dueño */
+    const r = await db.consulta('UPDATE usuarios SET clave_hash = $2, debe_cambiar_clave = $3 WHERE id = $1',
+      [req.params.id, await sesiones.hashear(clave), !propia], cx);
     if (!r.rowCount) throw noEncontrado('No existe el usuario.');
-    await sesiones.revocarDe(req.params.id, req.params.id === req.usuario.id ? req.sesionId : null, cx);
+    await sesiones.revocarDe(req.params.id, propia ? req.sesionId : null, cx);
   });
-  res.json({ ok: true, mensaje: 'Contraseña actualizada.' });
+  res.json({ ok: true, mensaje: propia ? 'Contraseña actualizada.' : 'Contraseña restablecida: se pedirá cambiarla al entrar.' });
 });
 
 usuarios.delete('/:id', soloAdmin, async (req, res) => {
@@ -120,10 +124,11 @@ permisos.post('/', async (req, res) => {
   const u = await db.uno('SELECT id FROM usuarios WHERE id = $1', [d.usuarioId]);
   if (!u) throw peticionInvalida('El usuario del permiso no existe.');
   const fila = await db.uno(
-    `INSERT INTO permisos (usuario_id, ambito, ref_id, nivel) VALUES ($1, $2, $3, $4)
+    `INSERT INTO permisos (id, usuario_id, ambito, ref_id, nivel)
+     VALUES (COALESCE($5, gen_random_uuid()::text), $1, $2, $3, $4)
      ON CONFLICT (usuario_id, ambito, ref_id) DO UPDATE SET nivel = EXCLUDED.nivel
      RETURNING id, (xmax = 0) AS nuevo`,
-    [d.usuarioId, d.ambito, d.refId, d.nivel]);
+    [d.usuarioId, d.ambito, d.refId, d.nivel, d.id || null]);
   res.status(fila.nuevo ? 201 : 200).json(await repo.obtener(D.permisos, fila.id));
 });
 

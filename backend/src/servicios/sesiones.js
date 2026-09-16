@@ -111,14 +111,25 @@ async function cambiarPropiaClave(usuarioId, sesionId, actual, nueva) {
   if (!fila || !(await bcrypt.compare(String(actual || ''), fila.clave_hash))) {
     throw new ErrorHttp(400, 'La contraseña actual no coincide.', 'CLAVE_INCORRECTA');
   }
+  if (String(actual) === String(nueva)) {
+    throw new ErrorHttp(400, 'La nueva contraseña debe ser distinta de la actual.', 'CLAVE_REPETIDA');
+  }
   await db.transaccion(async (cx) => {
-    await db.consulta('UPDATE usuarios SET clave_hash = $1 WHERE id = $2', [await hashear(nueva), usuarioId], cx);
+    await db.consulta('UPDATE usuarios SET clave_hash = $1, debe_cambiar_clave = false WHERE id = $2',
+      [await hashear(nueva), usuarioId], cx);
     await revocarDe(usuarioId, sesionId, cx);
   });
+}
+
+/* Borra las sesiones caducadas y las cerradas hace más de un día */
+async function purgar(cx) {
+  const r = await db.consulta(
+    "DELETE FROM sesiones WHERE expira < now() OR revocada < now() - interval '1 day'", [], cx);
+  return r.rowCount;
 }
 
 function reiniciarLimites() {
   intentos.clear();
 }
 
-module.exports = { entrar, verificar, salir, revocarDe, cambiarPropiaClave, hashear, reiniciarLimites };
+module.exports = { entrar, verificar, salir, revocarDe, cambiarPropiaClave, hashear, purgar, reiniciarLimites };

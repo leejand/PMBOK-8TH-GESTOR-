@@ -50,7 +50,8 @@ const NIVELES = { ver: 1, editar: 2, dirigir: 3 };
 
 const usuarios = {
   tabla: 'usuarios',
-  campos: [['id', 'id'], ['nombre', 'nombre'], ['correo', 'correo'], ['rol', 'rol'], ['activo', 'activo'], ...MARCAS],
+  campos: [['id', 'id'], ['nombre', 'nombre'], ['correo', 'correo'], ['rol', 'rol'], ['activo', 'activo'],
+    ['debeCambiarClave', 'debe_cambiar_clave'], ...MARCAS],
   orden: 't.nombre, t.creado'
 };
 
@@ -60,13 +61,15 @@ const clave = z.string().min(6, 'La contraseña debe tener al menos 6 caracteres
 
 usuarios.esquemas = {
   crear: z.object({
+    id: v.id.optional(),
     nombre: v.texto(200).optional(),
     correo: correo,
     clave: clave,
     rol: z.enum(E.roles).optional()
   }),
   actualizar: z.object({
-    nombre: v.textoRequerido(200), correo: correo, rol: z.enum(E.roles), activo: v.booleano
+    nombre: v.textoRequerido(200), correo: correo, rol: z.enum(E.roles), activo: v.booleano,
+    debeCambiarClave: v.booleano
   }).partial()
 };
 
@@ -75,6 +78,7 @@ const permisos = {
   campos: [['id', 'id'], ['usuarioId', 'usuario_id'], ['ambito', 'ambito'], ['refId', 'ref_id'], ['nivel', 'nivel'], ...MARCAS],
   esquemas: {
     crear: z.object({
+      id: v.id.optional(),
       usuarioId: v.id, ambito: z.enum(E.ambitos), refId: v.id, nivel: z.enum(E.nivelesPermiso)
     })
   }
@@ -133,7 +137,8 @@ const formaProyecto = {
 };
 
 proyectos.esquemas = {
-  crear: z.object(formaProyecto).partial().required({ nombre: true }),
+  /* La interfaz genera el id para poder abrir el proyecto sin esperar */
+  crear: z.object(formaProyecto).partial().extend({ id: v.id.optional(), creado }).required({ nombre: true }),
   actualizar: z.object({
     ...formaProyecto,
     estado: z.enum(E.estadosProyecto),

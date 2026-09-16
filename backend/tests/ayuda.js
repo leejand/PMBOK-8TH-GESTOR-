@@ -54,9 +54,16 @@ function cliente(base, token) {
   };
 }
 
-async function iniciar() {
+/* Punto de partida de casi todas las historias: cuentas que ya cambiaron
+   su contraseña inicial. El cambio obligatorio se prueba en HU-11. */
+function yaCambioSuClave(usuarioId) {
+  return db.consulta('UPDATE usuarios SET debe_cambiar_clave = false WHERE id = $1', [usuarioId]);
+}
+
+async function iniciar({ claveInicialPendiente = false } = {}) {
   await migrar({ reiniciar: true });
   await db.transaccion((cx) => sembrar(cx));
+  if (!claveInicialPendiente) await yaCambioSuClave('u-admin');
   require('../src/servicios/sesiones').reiniciarLimites();
 
   const servidor = await new Promise((resolver) => {
@@ -75,13 +82,15 @@ async function iniciar() {
 
   const admin = await entrar(ADMIN.correo, ADMIN.clave);
 
-  /* Crea una cuenta con el rol pedido y devuelve su cliente con sesión */
+  /* Crea una cuenta con el rol pedido y devuelve su cliente con sesión.
+     Con pendiente = true la cuenta conserva la obligación de cambiar la clave. */
   let n = 0;
-  async function crearUsuario(rol, nombre) {
+  async function crearUsuario(rol, nombre, { pendiente = false } = {}) {
     n++;
     const correo = rol + n + '@prueba.local';
     const r = await admin.post('/api/usuarios', { nombre: nombre || rol + ' ' + n, correo, clave: 'secreta' + n, rol });
     if (r.estado !== 201) throw new Error('No se pudo crear usuario: ' + JSON.stringify(r.datos));
+    if (!pendiente) await yaCambioSuClave(r.datos.id);
     const c = await entrar(correo, 'secreta' + n);
     c.clave = 'secreta' + n;
     return c;
@@ -93,7 +102,7 @@ async function iniciar() {
     await db.cerrar();
   }
 
-  return { base, anonimo, admin, entrar, crearUsuario, cerrar, db };
+  return { base, anonimo, admin, entrar, crearUsuario, yaCambioSuClave, cerrar, db };
 }
 
 /* Fecha local de hoy en AAAA-MM-DD, igual que CURRENT_DATE en Bogotá */

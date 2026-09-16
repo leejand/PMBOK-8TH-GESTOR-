@@ -7,15 +7,28 @@
 const db = require('../db');
 const sesiones = require('../servicios/sesiones');
 const D = require('../definiciones');
-const { noAutenticado, prohibido, noEncontrado } = require('../errores');
+const { ErrorHttp, noAutenticado, prohibido, noEncontrado } = require('../errores');
 
-async function requerirSesion(req, _res, next) {
+async function autenticar(req) {
   const cabecera = req.get('authorization') || '';
   const m = /^Bearer\s+(.+)$/i.exec(cabecera);
-  if (!m) return next(noAutenticado());
+  if (!m) throw noAutenticado();
   const { usuario, sesionId } = await sesiones.verificar(m[1].trim());
   req.usuario = usuario;
   req.sesionId = sesionId;
+}
+
+/* Con la contraseña pendiente de cambio solo se permite lo de /api/auth */
+async function requerirSesion(req, _res, next) {
+  await autenticar(req);
+  if (req.usuario.debeCambiarClave) {
+    throw new ErrorHttp(403, 'Antes de continuar debes cambiar tu contraseña.', 'CLAVE_PENDIENTE');
+  }
+  next();
+}
+
+async function requerirSesionAunConClavePendiente(req, _res, next) {
+  await autenticar(req);
   next();
 }
 
@@ -49,4 +62,4 @@ async function exigirProyecto(usuario, proyectoId, nivel, cx) {
   return fila.nivel;
 }
 
-module.exports = { requerirSesion, requerirRol, requerirGestion, exigirProyecto };
+module.exports = { requerirSesion, requerirSesionAunConClavePendiente, requerirRol, requerirGestion, exigirProyecto };

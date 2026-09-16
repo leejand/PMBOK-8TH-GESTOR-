@@ -46,17 +46,17 @@ async function listar(proyectoId) {
 }
 
 /* Idempotente: si el documento ya existe se devuelve tal cual */
-async function generar(proyectoId, artefactoId, procesoId, autorId) {
+async function generar(proyectoId, artefactoId, procesoId, autorId, id) {
   const art = artefacto(artefactoId);
   if (!art) throw peticionInvalida('El artefacto «' + artefactoId + '» no existe en el catálogo.');
   if (procesoId && !catalogo.cargar().flujoPorId[procesoId]) {
     throw peticionInvalida('El proceso «' + procesoId + '» no existe en el catálogo.');
   }
   const fila = await db.uno(
-    `INSERT INTO documentos (proyecto_id, artefacto_id, nombre, categoria, proceso_id, autor_id)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO documentos (id, proyecto_id, artefacto_id, nombre, categoria, proceso_id, autor_id)
+     VALUES (COALESCE($7, gen_random_uuid()::text), $1, $2, $3, $4, $5, $6)
      ON CONFLICT (proyecto_id, artefacto_id) DO NOTHING RETURNING id`,
-    [proyectoId, artefactoId, art.nombre, art.categoria, procesoId || null, autorId || null]);
+    [proyectoId, artefactoId, art.nombre, art.categoria, procesoId || null, autorId || null, id || null]);
   if (fila) return { documento: enriquecer(await repo.obtener(D.documentos, fila.id), true), yaExistia: false };
 
   const existente = await db.uno('SELECT id FROM documentos WHERE proyecto_id = $1 AND artefacto_id = $2',
