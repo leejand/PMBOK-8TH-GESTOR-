@@ -1,0 +1,81 @@
+/* ═══════════════════════════════════════════════════════════
+   config.js — Configuración leída del entorno y de backend/.env
+   Las variables ya presentes en el entorno tienen prioridad sobre
+   el archivo .env (así las pruebas apuntan a su propia base).
+   ═══════════════════════════════════════════════════════════ */
+
+'use strict';
+
+const path = require('path');
+const crypto = require('crypto');
+
+const RAIZ = path.resolve(__dirname, '..');
+require('dotenv').config({ path: path.join(RAIZ, '.env'), quiet: true });
+
+function entero(valor, porDefecto) {
+  const n = parseInt(valor, 10);
+  return Number.isFinite(n) ? n : porDefecto;
+}
+
+function lista(valor, porDefecto) {
+  if (!valor) return porDefecto;
+  return String(valor).split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+let secreto = process.env.JWT_SECRETO;
+if (!secreto || secreto.length < 32) {
+  secreto = crypto.randomBytes(48).toString('hex');
+  if (process.env.NODE_ENV !== 'test') {
+    console.warn('[config] JWT_SECRETO ausente o corto: se usa uno aleatorio y las sesiones caducan al reiniciar.');
+  }
+}
+
+const nombreBd = process.env.PGDATABASE || 'pmbok8';
+if (!/^[a-z_][a-z0-9_]{0,62}$/.test(nombreBd)) {
+  throw new Error('PGDATABASE solo admite minúsculas, dígitos y guion bajo: ' + nombreBd);
+}
+
+module.exports = {
+  raiz: RAIZ,
+  entorno: process.env.NODE_ENV || 'development',
+  puerto: entero(process.env.PORT, 3000),
+
+  bd: {
+    host: process.env.PGHOST || 'localhost',
+    port: entero(process.env.PGPORT, 5432),
+    user: process.env.PGUSER || 'postgres',
+    password: process.env.PGPASSWORD || '',
+    database: nombreBd,
+    max: entero(process.env.PGPOOL_MAX, 10),
+    application_name: 'pmbok8-backend'
+  },
+
+  jwt: {
+    secreto: secreto,
+    expiraHoras: entero(process.env.JWT_EXPIRA_HORAS, 12)
+  },
+
+  corsOrigenes: lista(process.env.CORS_ORIGENES, [
+    'http://localhost:3000', 'http://127.0.0.1:3000',
+    'http://localhost:8000', 'http://127.0.0.1:8000', 'null'
+  ]),
+
+  /* El backend sirve la interfaz existente desde la carpeta del proyecto */
+  frontendDir: path.resolve(RAIZ, process.env.FRONTEND_DIR || '..'),
+  catalogoDir: path.resolve(RAIZ, process.env.CATALOGO_DIR || '../assets/js/datos'),
+
+  admin: {
+    nombre: process.env.ADMIN_NOMBRE || 'Administrador',
+    correo: (process.env.ADMIN_CORREO || 'admin@pmbok.local').toLowerCase(),
+    clave: process.env.ADMIN_CLAVE || 'admin123'
+  },
+
+  archivos: {
+    limiteBytes: entero(process.env.ARCHIVO_LIMITE_MB, 10) * 1024 * 1024
+  },
+
+  acceso: {
+    intentosMaximos: entero(process.env.LOGIN_INTENTOS, 10),
+    ventanaMinutos: entero(process.env.LOGIN_VENTANA_MIN, 15)
+  }
+};
