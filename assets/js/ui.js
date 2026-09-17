@@ -24,6 +24,7 @@ window.UI = (function () {
       (opc.min !== undefined ? ' min="' + opc.min + '"' : '') +
       (opc.max !== undefined ? ' max="' + opc.max + '"' : '') +
       (opc.paso ? ' step="' + opc.paso + '"' : '') +
+      (opc.lista ? ' list="' + R.escapar(opc.lista) + '" autocomplete="off"' : '') +
       (opc.requerido ? ' required' : '') + '></div>';
   }
 

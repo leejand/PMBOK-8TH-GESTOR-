@@ -38,7 +38,7 @@ const TABLAS_DATOS = [
   'usuarios', 'sesiones', 'permisos', 'portafolios', 'programas', 'rocas', 'metricas', 'metrica_valores',
   'asientos', 'vto', 'proyectos', 'miembros', 'proyecto_procesos', 'documentos', 'archivos',
   'archivo_contenidos', 'riesgos', 'interesados', 'cambios', 'lecciones', 'sprints', 'sprint_burndown',
-  'tareas', 'mediciones', 'comentarios'
+  'tareas', 'mediciones', 'comentarios', 'invitaciones'
 ];
 
 async function vaciar(cx) {
@@ -96,7 +96,7 @@ async function importar(datos, usuarioActual, sesionId) {
   };
 
   return db.transaccion(async (cx) => {
-    const previos = await db.varios('SELECT id, correo, clave_hash, nombre, rol, debe_cambiar_clave FROM usuarios', [], cx);
+    const previos = await db.varios('SELECT id, correo, clave_hash, nombre, rol, debe_cambiar_clave, origen FROM usuarios', [], cx);
     const sesion = sesionId ? await db.uno('SELECT * FROM sesiones WHERE id = $1', [sesionId], cx) : null;
     const hashProvisional = await sesiones.hashear(CLAVE_PROVISIONAL);
     let restablecidas = 0;
@@ -117,12 +117,13 @@ async function importar(datos, usuarioActual, sesionId) {
          que ya existía (mismo id o correo), con su obligación de cambiarla,
          o se asigna la provisional, que su dueño cambiará al entrar */
       await db.consulta(
-        `INSERT INTO usuarios (id, correo, nombre, rol, activo, clave_hash, debe_cambiar_clave, creado)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, now()))`,
+        `INSERT INTO usuarios (id, correo, nombre, rol, activo, clave_hash, debe_cambiar_clave, creado, origen)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, now()), $9)`,
         [id, correo, requerido(u.nombre, 200) || correo, enumOr(u.rol, D.E.roles, 'miembro'),
          u.activo !== false, previo ? previo.clave_hash : hashProvisional,
          previo ? previo.debe_cambiar_clave : true,
-         ms(u.creado) ? new Date(u.creado) : null], cx);
+         ms(u.creado) ? new Date(u.creado) : null,
+         previo ? previo.origen : 'importacion'], cx);
       U.add(id); correos.add(correo);
       cuenta('usuarios', true);
     }

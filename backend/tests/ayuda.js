@@ -65,6 +65,7 @@ async function iniciar({ claveInicialPendiente = false } = {}) {
   await db.transaccion((cx) => sembrar(cx));
   if (!claveInicialPendiente) await yaCambioSuClave('u-admin');
   require('../src/servicios/sesiones').reiniciarLimites();
+  require('../src/servicios/invitaciones').reiniciarLimites();
 
   const servidor = await new Promise((resolver) => {
     const s = crearApp().listen(0, '127.0.0.1', () => resolver(s));

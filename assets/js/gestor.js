@@ -30,7 +30,7 @@ window.Gestor = (function () {
   var COLECCIONES = [
     'usuarios', 'permisos', 'portafolios', 'programas', 'proyectos', 'miembros',
     'procesos', 'documentos', 'archivos', 'riesgos', 'interesados', 'cambios',
-    'lecciones', 'tareas', 'sprints', 'mediciones', 'comentarios',
+    'lecciones', 'tareas', 'sprints', 'mediciones', 'comentarios', 'invitaciones',
     'rocas', 'metricas', 'asientos'
   ];
 
@@ -113,7 +113,7 @@ window.Gestor = (function () {
                        'tareas', 'sprints', 'mediciones', 'comentarios'];
   var RUTA_GLOBAL = ['portafolios', 'rocas', 'metricas', 'asientos'];
   var RUTA_ITEM = RUTA_PROYECTO.concat(RUTA_GLOBAL,
-    ['programas', 'documentos', 'archivos', 'usuarios', 'permisos', 'proyectos']);
+    ['programas', 'documentos', 'archivos', 'usuarios', 'permisos', 'proyectos', 'invitaciones']);
   /* Campos calculados que la API añade a sus respuestas y no se guardan */
   var CALCULADOS = ['severidad', 'sprintCerrado', 'progreso', 'siguiente', 'completitud', 'plantilla'];
 
@@ -427,6 +427,49 @@ window.Gestor = (function () {
     return { usuario: nuevo };
   }
 
+  /* ── Registro propio ──
+     Cada persona crea su cuenta con el rol de registro (director por defecto:
+     crea su proyecto y añade a sus compañeros). Nunca administrador. */
+  function registroAbierto() {
+    if (!enServidor()) return true;
+    var s = Api.salud();
+    return !s || s.registroAbierto !== false;
+  }
+
+  function registroRol() {
+    var s = enServidor() ? Api.salud() : null;
+    return (s && s.registroRol) || 'director';
+  }
+
+  /* datos: { nombre?, correo, clave }. Local: resultado inmediato; servidor: promesa */
+  function registrar(datos) {
+    var nombre = String(datos.nombre || '').trim();
+    var correo = String(datos.correo || '').trim().toLowerCase();
+    var clave = String(datos.clave || '');
+    if (!/^[^@\s]+@[^@\s]+$/.test(correo)) return resultado({ error: 'Escribe un correo válido.' });
+    if (clave.length < 6) return resultado({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+
+    if (enServidor()) {
+      return Api.pedir('POST', '/auth/registrar', { nombre: nombre, correo: correo, clave: clave })
+        .then(function (r) {
+          Api.fijarToken(r.token);
+          return hidratarOClavePendiente(r.usuario).then(function () { return { usuario: r.usuario }; });
+        })
+        .catch(function (err) { return { error: err.message }; });
+    }
+    if (!registroAbierto()) return { error: 'El registro está cerrado.' };
+    if (lista('usuarios').some(function (u) { return u.correo.toLowerCase() === correo; })) {
+      return { error: 'Ya existe una cuenta con ese correo. Entra con tu contraseña.' };
+    }
+    var u = crear('usuarios', {
+      nombre: nombre || correo.split('@')[0], correo: correo, clave: huella(clave),
+      rol: registroRol(), activo: true, origen: 'registro'
+    });
+    cargar().sesion = { usuarioId: u.id, desde: ahora() };
+    guardar();
+    return { usuario: u };
+  }
+
   function cambiarClave(usuarioId, nueva) {
     if (!nueva || nueva.length < 6) return { error: 'La contraseña debe tener al menos 6 caracteres.' };
     if (enServidor()) {
@@ -514,7 +557,7 @@ window.Gestor = (function () {
     });
 
     var m = lista('miembros', { proyectoId: proyectoId }).filter(function (x) { return x.usuarioId === u.id; })[0];
-    if (m) max = Math.max(max, m.rol === 'lider' ? NIVELES.dirigir : NIVELES.editar);
+    if (m) max = Math.max(max, nivelDeRol(m.rol));
 
     return max;
   }
@@ -530,6 +573,110 @@ window.Gestor = (function () {
     /* El servidor ya solo envía los visibles */
     if (u.rol === 'admin' || enServidor()) return lista('proyectos');
     return lista('proyectos').filter(function (p) { return nivelEn(p.id) > 0; });
+  }
+
+  /* ══════════════ Equipo: roles e invitaciones ══════════════ */
+
+  /* Rol dentro de un proyecto → nivel. Igual que nivel_en() en la base. */
+  var ROLES_PROYECTO = [
+    { id: 'lider', nombre: 'Líder de proyecto', nivel: 'dirigir' },
+    { id: 'po', nombre: 'Product Owner', nivel: 'editar' },
+    { id: 'sm', nombre: 'Scrum Master', nivel: 'editar' },
+    { id: 'equipo', nombre: 'Equipo de desarrollo', nivel: 'editar' },
+    { id: 'ejecutor', nombre: 'Ejecutor', nivel: 'editar' },
+    { id: 'observador', nombre: 'Observador', nivel: 'ver' }
+  ];
+
+  function nivelDeRol(rol) {
+    var r = ROLES_PROYECTO.filter(function (x) { return x.id === rol; })[0];
+    return NIVELES[r ? r.nivel : 'editar'];
+  }
+
+  /* Sin 0/O ni 1/I, como el servidor */
+  var ALFABETO_CODIGO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+  function nuevoCodigo() {
+    var bytes = new Uint8Array(8);
+    if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+    else for (var i = 0; i < 8; i++) bytes[i] = Math.floor(Math.random() * 256);
+    var s = '';
+    for (var j = 0; j < 8; j++) s += ALFABETO_CODIGO[bytes[j] % ALFABETO_CODIGO.length];
+    return s;
+  }
+
+  /* «abcd-2345» → «ABCD2345» */
+  function normalizarCodigo(texto) {
+    return String(texto || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+
+  function codigoLegible(codigo) {
+    return codigo ? codigo.slice(0, 4) + '-' + codigo.slice(4) : '';
+  }
+
+  function invitacionesDe(proyectoId) {
+    return lista('invitaciones', { proyectoId: proyectoId }).sort(function (a, b) { return b.creado - a.creado; });
+  }
+
+  function invitacionVigente(inv) {
+    return !inv.expira || inv.expira > ahora();
+  }
+
+  /* opciones: { rol, dias }. El código se genera aquí para mostrarlo sin esperar. */
+  function crearInvitacion(proyectoId, opciones) {
+    if (!puede(proyectoId, 'dirigir')) return { error: 'Solo el líder del proyecto puede invitar.' };
+    var rol = (opciones && opciones.rol) || 'equipo';
+    if (rol === 'lider') return { error: 'Un código no puede dar el rol de líder.' };
+    var dias = opciones && opciones.dias ? Number(opciones.dias) : null;
+    var inv = crearLocal('invitaciones', {
+      proyectoId: proyectoId, codigo: nuevoCodigo(), rol: rol,
+      expira: dias ? ahora() + dias * 86400000 : null,
+      usos: 0, creadoPor: (usuarioActual() || {}).id || null
+    });
+    if (enServidor()) {
+      Remoto.enviar({
+        metodo: 'POST', ruta: '/proyectos/' + Api.c(proyectoId) + '/invitaciones', descripcion: 'código de invitación',
+        cuerpo: { id: inv.id, codigo: inv.codigo, rol: rol, dias: dias, creado: inv.creado },
+        despues: adoptar('invitaciones', inv.id)
+      });
+    }
+    return { invitacion: inv };
+  }
+
+  function borrarInvitacion(id) { return borrar('invitaciones', id); }
+
+  /* Entrar a un equipo con un código. Local: resultado; servidor: promesa.
+     { proyecto: { id, nombre }, rol, nivel, yaEraMiembro } o { error } */
+  function unirseConCodigo(texto) {
+    var codigo = normalizarCodigo(texto);
+    if (!/^[A-HJ-NP-Z2-9]{8}$/.test(codigo)) {
+      return resultado({ error: 'El código tiene 8 letras y números, por ejemplo ABCD-2345.' });
+    }
+    var u = usuarioActual();
+    if (!u) return resultado({ error: 'No hay sesión iniciada.' });
+
+    if (enServidor()) {
+      return Remoto.esperar()
+        .then(function () { return Api.pedir('POST', '/invitaciones/unirse', { codigo: codigo }); })
+        .then(function (r) { return hidratar().then(function () { return r; }); })
+        .catch(function (err) { return { error: err.message }; });
+    }
+
+    var inv = lista('invitaciones').filter(function (x) { return x.codigo === codigo; })[0];
+    var p = inv && uno('proyectos', inv.proyectoId);
+    if (!inv || !p) return { error: 'Ese código no existe. Revísalo con el líder de tu proyecto.' };
+    if (!invitacionVigente(inv)) return { error: 'El código caducó. Pide al líder de tu proyecto uno nuevo.' };
+
+    var previo = lista('miembros', { proyectoId: p.id }).filter(function (m) { return m.usuarioId === u.id; })[0];
+    if (!previo) {
+      crear('miembros', { proyectoId: p.id, usuarioId: u.id, rol: inv.rol });
+      actualizarLocal('invitaciones', inv.id, { usos: (inv.usos || 0) + 1 });
+    }
+    return {
+      proyecto: { id: p.id, nombre: p.nombre },
+      rol: previo ? previo.rol : inv.rol,
+      nivel: nivelEn(p.id),
+      yaEraMiembro: !!previo
+    };
   }
 
   /* ══════════════ Proyectos ══════════════ */
@@ -613,7 +760,7 @@ window.Gestor = (function () {
   function proyecto(id) { return uno('proyectos', id); }
 
   var HIJAS_PROYECTO = ['procesos', 'documentos', 'archivos', 'riesgos', 'interesados', 'cambios', 'lecciones',
-    'tareas', 'sprints', 'mediciones', 'comentarios', 'miembros'];
+    'tareas', 'sprints', 'mediciones', 'comentarios', 'miembros', 'invitaciones'];
 
   function borrarProyecto(id) {
     var previo = proyecto(id);
@@ -1248,9 +1395,14 @@ window.Gestor = (function () {
     esAdmin: esAdmin, puedeGestionar: puedeGestionar, crearUsuario: crearUsuario,
     cambiarClave: cambiarClave, cambiarPropiaClave: cambiarPropiaClave, roles: ROLES,
     mostrarCuentaInicial: mostrarCuentaInicial,
+    registroAbierto: registroAbierto, registroRol: registroRol, registrar: registrar,
     /* permisos */
     permisosDe: permisosDe, conceder: conceder, revocar: revocar,
     nivelEn: nivelEn, puede: puede, proyectosVisibles: proyectosVisibles,
+    /* equipo */
+    rolesProyecto: ROLES_PROYECTO, invitacionesDe: invitacionesDe, crearInvitacion: crearInvitacion,
+    borrarInvitacion: borrarInvitacion, unirseConCodigo: unirseConCodigo,
+    invitacionVigente: invitacionVigente, codigoLegible: codigoLegible,
     /* proyectos */
     crearProyecto: crearProyecto, proyecto: proyecto, borrarProyecto: borrarProyecto,
     borrarPortafolio: borrarPortafolio,

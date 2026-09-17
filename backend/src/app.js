@@ -33,6 +33,7 @@ function cabecerasSeguridad(_req, res, next) {
 function crearApp() {
   const app = express();
   app.disable('x-powered-by');
+  if (config.confiarProxy) app.set('trust proxy', config.confiarProxy);
   app.use(cabecerasSeguridad);
 
   app.use('/api', cors({
@@ -60,6 +61,9 @@ function crearApp() {
       catalogo: { procesos: fila.procesos, artefactos: fila.artefactos, enMemoria: catalogo.cargar().flujo.length },
       /* Solo existe la cuenta inicial y aún tiene su contraseña por defecto */
       primerUso: fila.primer_uso === true,
+      /* La pantalla de acceso ofrece «Crear cuenta» solo si está abierto */
+      registroAbierto: config.registro.abierto,
+      registroRol: config.registro.rol,
       hora: new Date().toISOString()
     });
   });

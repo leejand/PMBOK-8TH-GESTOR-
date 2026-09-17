@@ -50,6 +50,10 @@ async function estado(usuario) {
   for (const [nombre, def] of GLOBALES) {
     salida[nombre] = await repo.listar(def, {});
   }
+  /* Los códigos de invitación solo viajan a quien dirige su proyecto */
+  const dirigidos = proyectos.filter((p) => p.nivel >= D.NIVELES.dirigir).map((p) => p.id);
+  salida.invitaciones = await repo.listarEn(D.invitaciones, 'proyecto_id', dirigidos);
+
   salida.permisos = usuario.rol === 'admin'
     ? await repo.listar(D.permisos, {})
     : await repo.listar(D.permisos, { usuario_id: usuario.id });

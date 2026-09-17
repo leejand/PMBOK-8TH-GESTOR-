@@ -18,7 +18,8 @@
     "bd:iniciar": "scripts\\postgres.cmd iniciar",
     "bd:detener": "scripts\\postgres.cmd detener",
     "bd:estado": "scripts\\postgres.cmd estado",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "humo": "node scripts/humo.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

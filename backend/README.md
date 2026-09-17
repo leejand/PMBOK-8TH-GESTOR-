@@ -4,8 +4,8 @@ API REST en **Node.js + Express 5** con base de datos **PostgreSQL 17**. Guarda 
 todo lo que hoy la interfaz guarda en `localStorage`: usuarios, permisos, portafolios, proyectos
 con sus 40 procesos, documentos, archivos, riesgos, trabajo ágil, valor ganado y la capa EOS.
 
-> **Estado:** API, base de datos e interfaz conectadas y probadas: 97 pruebas de aceptación de la
-> API y 10 pruebas en navegador (Edge). Servida desde `http://localhost:3000`, la interfaz trabaja
+> **Estado:** API, base de datos e interfaz conectadas y probadas: 108 pruebas de aceptación de la
+> API y 12 pruebas en navegador (Edge). Servida desde `http://localhost:3000`, la interfaz trabaja
 > contra esta API; abierta con doble clic sobre `index.html`, sigue en modo local como siempre.
 
 ---
@@ -66,6 +66,12 @@ catálogo y garantiza que exista un administrador. Solo escucha en el propio equ
 | `ADMIN_CORREO` `ADMIN_CLAVE` | `admin@pmbok.local` `admin123` | Cuenta inicial, solo si no hay ningún administrador |
 | `CORS_ORIGENES` | `localhost:3000`, `localhost:8000`, `null` | Orígenes admitidos (`null` = `index.html` abierto desde el disco) |
 | `ARCHIVO_LIMITE_MB` | `10` | Tamaño máximo de un archivo subido |
+| `REGISTRO_ABIERTO` | `true` | Cada persona crea su cuenta desde la pantalla de acceso. `false`: solo el administrador crea cuentas |
+| `REGISTRO_ROL` | `director` | Rol de las cuentas registradas: `director` (crea su proyecto y forma su equipo), `miembro` o `ejecutor`. Nunca `admin` |
+| `REGISTRO_POR_HORA` | `200` | Cuentas nuevas permitidas por IP en una hora (un aula comparte IP pública) |
+| `TRUST_PROXY` | vacío | Detrás de Caddy o nginx, `1`: los límites por IP usan la IP real del visitante |
+| `NODE_ENV` | — | `production` exige `JWT_SECRETO` fijo; sin él la app no arranca. Ver [DESPLIEGUE.md](DESPLIEGUE.md) |
+| `INVITACION_INTENTOS` · `INVITACION_VENTANA_MIN` | `10` · `15` | Códigos incorrectos por usuario antes de bloquear, y durante cuántos minutos |
 
 ---
 
@@ -77,6 +83,7 @@ backend/
   scripts/postgres.cmd        iniciar | detener | estado de PostgreSQL
   db/
     migraciones/001_esquema.sql   Tablas, restricciones, disparadores, nivel_en() y vista de avance
+    migraciones/002_…, 003_…      Cambio obligatorio de clave; registro propio e invitaciones
     migrar.js                 Crea la base y aplica migraciones (tabla schema_migraciones)
     semilla.js                Catálogo + administrador inicial (idempotente)
   src/
@@ -88,11 +95,11 @@ backend/
     repositorio.js            CRUD genérico camelCase ⇄ snake_case
     errores.js · validacion.js
     middleware/auth.js        Sesión, roles y nivel por proyecto
-    servicios/                sesiones · estado · proyectos · trabajo · documentos · datos
+    servicios/                sesiones · estado · proyectos · trabajo · documentos · datos · invitaciones
     rutas/                    auth · usuarios · proyectos · organizacion · recursos
   tests/
     ayuda.js                  Base aislada + servidor real en puerto libre
-    aceptacion/*.test.js      11 historias de usuario, 97 criterios (API)
+    aceptacion/*.test.js      12 historias de usuario, 108 criterios (API)
     e2e/*.spec.js             Pruebas en navegador (Playwright + Edge)
   playwright.config.js        Arranca su propia API en :3100 con la base pmbok8_e2e
 ```
@@ -103,14 +110,14 @@ tablas `catalogo_procesos` y `catalogo_artefactos`, que sirven de claves foráne
 
 ## Modelo de datos
 
-28 tablas y una vista (`v_progreso_proyecto`). Entidades y series temporales van en tablas propias; las listas pequeñas que la
+29 tablas y una vista (`v_progreso_proyecto`). Entidades y series temporales van en tablas propias; las listas pequeñas que la
 interfaz edita enteras (fases, hitos, DoD, metas de una roca, orden del flujo y estado de la
 verificación de calidad) van en `JSONB` con su tipo comprobado.
 
 | Área | Tablas |
 |---|---|
-| Acceso | `usuarios` (hash bcrypt), `sesiones`, `permisos` |
-| Cartera | `portafolios`, `programas`, `proyectos`, `miembros` |
+| Acceso | `usuarios` (hash bcrypt y `origen`: admin, registro o importación), `sesiones`, `permisos` |
+| Cartera | `portafolios`, `programas`, `proyectos`, `miembros`, `invitaciones` (códigos del equipo) |
 | Ciclo de vida | `proyecto_procesos`, `documentos`, `archivos`, `archivo_contenidos` (binario aparte) |
 | Dominios | `riesgos`, `interesados`, `cambios`, `lecciones`, `comentarios` |
 | Trabajo y control | `sprints`, `sprint_burndown` (una fila por día), `tareas`, `mediciones` |
@@ -131,15 +138,18 @@ Reglas que garantiza la propia base, no solo la API:
 ## Permisos
 
 Nivel efectivo por proyecto: **0** sin acceso · **1** ver · **2** editar · **3** dirigir.
-Administrador y director del proyecto dirigen; el líder del equipo dirige; el resto de miembros
-edita; los permisos por portafolio, programa o proyecto se suman y **gana el más alto**.
+Administrador y director del proyecto dirigen. Dentro del equipo, el nivel sale del rol del
+miembro: **líder** dirige, **observador** solo ve y el resto (PO, SM, equipo, ejecutor) edita.
+Los permisos por portafolio, programa o proyecto se suman y **gana el más alto**.
 
 | Acción | Quién |
 |---|---|
 | Ver un proyecto y todo lo suyo | nivel ≥ 1 (si es 0, la API responde **404**, no revela que existe) |
 | Comentar | nivel ≥ 1; editar o borrar un comentario: su autor o nivel ≥ 2 |
 | Procesos, documentos, archivos, riesgos, tareas, sprints, mediciones, hitos, DoD, calidad, orden del flujo | nivel ≥ 2 |
-| Configuración del proyecto, metodología, fases, equipo, borrar el proyecto | nivel 3 |
+| Configuración del proyecto, metodología, fases, equipo y roles, códigos de invitación, borrar el proyecto | nivel 3 |
+| Crear la propia cuenta (nace con `REGISTRO_ROL`, por defecto `director`, sin proyectos) | cualquiera, si `REGISTRO_ABIERTO` |
+| Unirse a un equipo con un código | cualquier sesión; entra con el rol del código (nunca líder) |
 | Crear proyectos; crear o cambiar portafolios, programas, rocas, métricas, asientos y VTO | rol `admin` o `director` |
 | Leer portafolios, EOS, usuarios y catálogo | cualquier sesión (el catálogo es público) |
 | Usuarios, permisos, exportar, importar y reiniciar | rol `admin` |
@@ -152,6 +162,15 @@ aplica también: oculta lo que el rol no puede hacer y muestra la gerencia EOS e
 administrador y las importadas con la provisional quedan marcadas (`debeCambiarClave`). Mientras lo
 estén, la API responde `403 CLAVE_PENDIENTE` a todo salvo `GET /api/auth/yo`, `PUT /api/auth/clave`
 y `POST /api/auth/salir`, y la interfaz pide elegir una contraseña nueva, distinta de la actual.
+Una cuenta creada por su dueño en el registro no queda marcada: la contraseña solo la conoce él.
+
+**Uso en un aula.** Cada alumno crea su cuenta en **Crear cuenta** y entra como `director`
+(`REGISTRO_ROL`), así que quien lidera su grupo crea el proyecto sin pasar por un administrador.
+Añade a sus compañeros en **Equipo → Añadir compañero por correo**, o genera en **Invitar al
+equipo** un código (8 caracteres sin 0/O ni 1/I, con rol y caducidad opcional) que ellos escriben en
+**Panel → Unirme con un código**. Todos trabajan sobre los mismos datos; configuración, equipo,
+roles y códigos quedan solo para el líder. Con `REGISTRO_ROL=miembro`, solo crea proyectos quien
+reciba el rol director de un administrador.
 
 ---
 
@@ -169,9 +188,10 @@ con 400 (datos no válidos), 401 (sin sesión), 403 (sin permiso), 404, 409 (con
 
 | Método y ruta | Descripción |
 |---|---|
-| `GET /api/salud` | Estado de la base y del catálogo; `primerUso` indica que solo existe la cuenta inicial sin estrenar |
+| `GET /api/salud` | Estado de la base y del catálogo; `primerUso` indica que solo existe la cuenta inicial sin estrenar; `registroAbierto` |
 | `GET /api/catalogo/metodologias` · `bandas` · `procesos` · `artefactos` · `artefactos/:id` | Contenido de la guía |
 | `POST /api/auth/entrar` | `{ correo, clave }` → `{ token, expira, usuario }` |
+| `POST /api/auth/registrar` | `{ nombre?, correo, clave }` (clave ≥ 6) → 201 `{ token, expira, usuario }`, ya con sesión. Rol de `REGISTRO_ROL`; el rol enviado se ignora. 403 `REGISTRO_CERRADO`, 409 correo existente, 429 demasiadas altas |
 
 ### Sesión y administración
 
@@ -202,6 +222,9 @@ con 400 (datos no válidos), 401 (sin sesión), 403 (sin permiso), 404, 409 (con
 | `POST /api/documentos/:id/versiones` | Versión + 1 y vuelta a borrador |
 | `GET` · `POST /api/proyectos/:id/archivos` | Listar; subir `multipart/form-data` (`archivo`, `categoria?`, `nombre?`, `id?`) |
 | `GET /api/archivos/:id` · `GET /api/archivos/:id/contenido[?enLinea=1]` · `DELETE /api/archivos/:id` | Metadatos, descarga (en línea solo imágenes, PDF y texto), borrar |
+| `GET` · `POST /api/proyectos/:id/invitaciones` | Nivel 3. Listar códigos; crear `{ id?, codigo?, rol?, dias? }` (rol por defecto `equipo`, nunca `lider`; `dias` 1-365 o sin caducidad) |
+| `DELETE /api/invitaciones/:id` | Nivel 3. Retirar un código |
+| `POST /api/invitaciones/unirse` | Cualquier sesión. `{ codigo }` (admite `abcd-2345`) → 201 `{ proyecto, rol, nivel, yaEraMiembro }`; 200 si ya era miembro (conserva su rol); 404 inexistente, 410 `CODIGO_CADUCADO`, 429 tras 10 fallos |
 
 ### Registros de un proyecto
 
@@ -286,8 +309,9 @@ criterio de aceptación:
 | HU-09 Datos | 7 | Exportación sin contraseñas, importación saneada de una exportación del navegador, ida y vuelta idéntica, reinicio |
 | HU-10 Interfaz y seguridad | 8 | Sirve la interfaz, no expone `.env` ni el código, cabeceras, CORS, catálogo, inyección SQL, cuerpos enormes |
 | HU-11 Estado y seguridad básica | 6 | Cambio obligatorio de contraseña, `/api/estado` filtrado por visibilidad, identificadores del cliente, purga de sesiones, rol sin privilegios |
+| HU-12 Registro e invitaciones | 11 | Cuenta propia como director con auto-login, validaciones, registro cerrado, `REGISTRO_ROL` (nunca admin), códigos solo del líder y nunca con rol de líder, mismos datos que el líder sin sus permisos, observador solo ve, caducidad y bloqueo, cascada, y la cadena completa registro → proyecto → dos compañeros → datos guardados en la base |
 
-Última ejecución: **97 de 97 superadas** en unos 20 s. Las pruebas se ejecutan con la cuenta
+Última ejecución: **108 de 108 superadas** en unos 37 s, sobre PostgreSQL 18. Las pruebas se ejecutan con la cuenta
 `pmbok8_app`, así que también comprueban que sus permisos bastan.
 
 ### En el navegador
@@ -300,8 +324,9 @@ propia API en el puerto 3100 con la base `pmbok8_e2e` y maneja la aplicación co
 | E2E-01 Servidor (8 pruebas) | Cambio obligatorio de contraseña; crear proyecto, completar 2.1.1 y redactar el acta, **recargar y encontrarlo todo**; tablero del sprint y burndown; riesgos, interesados y valor ganado; subir y descargar un archivo; un rechazo del servidor se avisa y se revierte; cuenta creada desde Administración que ve solo lo permitido; cerrar sesión |
 | E2E-02 Migración | Lo guardado en el navegador (base e IndexedDB) pasa al servidor con **Llevar al servidor**, archivo incluido |
 | E2E-03 Modo local | Abierta con doble clic funciona sin ninguna llamada a la API y guarda en `localStorage` |
+| E2E-04 Registro y equipo (2 pruebas) | Compañeros y líder crean su cuenta; la líder crea el proyecto y los añade por correo; una compañera vuelve a entrar, guarda el acta y tras recargar la líder la lee; el observador solo ve; un cuarto entra con código. Lo mismo en modo local, sin API |
 
-Última ejecución: **10 de 10 superadas** en unos 36 s.
+Última ejecución: **12 de 12 superadas** en algo más de 1 minuto.
 
 ---
 

@@ -39,6 +39,20 @@ La pantalla de acceso la muestra y trae un botón para entrar directamente. En m
 primera vez obliga a elegir una contraseña propia, igual que a cualquier cuenta creada por un
 administrador.
 
+### En un aula: cada alumno con su cuenta
+
+1. Cada alumno pulsa **Crear cuenta** en la pantalla de acceso y entra directo al Panel.
+2. Quien lidera el grupo pulsa **Nuevo proyecto** (las cuentas registradas nacen como *director*).
+3. En **Equipo**, el líder escribe el correo de cada compañero en **Añadir compañero por correo**, o
+   genera un **código** (por ejemplo `KZL2-9FAD`) que ellos escriben en **Panel → Unirme con un código**.
+4. Cada compañero entra con su correo y contraseña y ya ve el proyecto.
+
+Todos ven los mismos datos del proyecto. Según su rol en el equipo, el **líder** dirige (configuración,
+metodología, equipo, roles, códigos, borrar), el **observador** solo ve y el resto edita el trabajo.
+En `backend/.env`: `REGISTRO_ABIERTO=false` cierra el registro y `REGISTRO_ROL=miembro` hace que solo
+cree proyectos quien reciba el rol director de un administrador. Para publicarlo en internet, ver
+[`backend/DESPLIEGUE.md`](backend/DESPLIEGUE.md).
+
 Si prefieres servirlo en red local:
 
 ```bash
@@ -120,7 +134,8 @@ Nueve pestañas:
 7. **Control (EVM)** — registro de PV, EV y AC por fecha; cálculo de CV, SV, CPI, SPI, EAC, ETC,
    VAC y TCPI. CPI, SPI, EAC y TCPI se muestran como fichas con su estado en palabras
    (*En rango*, *Vigilar*, *Actuar*) y un gráfico de líneas PV · EV · AC a lo largo del tiempo.
-8. **Equipo** — miembros y sus roles, configuración del proyecto, cambio de metodología y fases.
+8. **Equipo** — miembros y sus roles (líder dirige, observador solo ve, el resto edita), **códigos de
+   invitación** para que el grupo entre al proyecto, configuración, cambio de metodología y fases.
 9. **Calidad del plan** — la verificación descrita más abajo.
 
 ### La ficha de cada proceso
@@ -135,7 +150,7 @@ ejemplo práctico, errores frecuentes y notas del equipo.
 
 - **Portafolios y programas**: cartera jerárquica; un proyecto cambia de portafolio desde su fila.
 - **Agenda**: calendario global de todos los proyectos visibles.
-- **Administración**: cuentas, roles (administrador, director, miembro, ejecutor) y **permisos por
+- **Administración**: cuentas (las registradas por sus dueños se marcan «se registró solo»), roles (administrador, director, miembro, ejecutor) y **permisos por
   portafolio, programa o proyecto** con tres niveles (ver, editar, dirigir). Los permisos se suman
   y gana el más alto. Exportación e importación de toda la base.
 

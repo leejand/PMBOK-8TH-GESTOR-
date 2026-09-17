@@ -614,15 +614,52 @@ window.ObraAcciones = (function () {
 
       /* ── Equipo ── */
       case 'agregar-miembro': {
-        var uid = valor('nmb-usuario');
-        if (!uid) return;
-        Gestor.crear('miembros', { proyectoId: proyectoId, usuarioId: uid, rol: valor('nmb-rol') });
+        var correo = valor('nmb-correo').trim().toLowerCase();
+        var caja = document.getElementById('nmb-error');
+        var fallo = function (texto) {
+          if (caja) caja.innerHTML = '<div class="nota alerta"><div class="nota-titulo">No se pudo añadir</div>' +
+            Render.escapar(texto) + '</div>';
+        };
+        if (!correo) { fallo('Escribe el correo con el que tu compañero creó su cuenta.'); return; }
+        var cuenta = Gestor.lista('usuarios').filter(function (u) { return (u.correo || '').toLowerCase() === correo; })[0];
+        if (!cuenta) { fallo('No hay ninguna cuenta con «' + correo + '». Pídele que la cree con «Crear cuenta» o compártele un código de invitación.'); return; }
+        if (!cuenta.activo) { fallo('La cuenta de ' + cuenta.nombre + ' está desactivada.'); return; }
+        if (Gestor.lista('miembros', { proyectoId: proyectoId }).some(function (m) { return m.usuarioId === cuenta.id; })) {
+          fallo(cuenta.nombre + ' ya es miembro del proyecto.'); return;
+        }
+        Gestor.crear('miembros', { proyectoId: proyectoId, usuarioId: cuenta.id, rol: valor('nmb-rol') });
         recargar();
+        Dialogo.avisar(cuenta.nombre + ' se unió al equipo');
         break;
       }
       case 'quitar-miembro':
         Gestor.borrar('miembros', id);
         recargar();
+        break;
+
+      case 'crear-invitacion': {
+        var ri = Gestor.crearInvitacion(proyectoId, { rol: valor('ninv-rol'), dias: valor('ninv-dias') });
+        if (ri.error) { Dialogo.avisar(ri.error, 'error'); return; }
+        recargar();
+        Dialogo.avisar('Código ' + Gestor.codigoLegible(ri.invitacion.codigo) + ' listo para compartir');
+        break;
+      }
+      case 'copiar-codigo': {
+        var inv = Gestor.uno('invitaciones', id);
+        if (!inv) return;
+        var texto = Gestor.codigoLegible(inv.codigo);
+        var hecho = function () { Dialogo.avisar('Código ' + texto + ' copiado'); };
+        var aMano = function () {
+          Dialogo.informar({ titulo: 'Código de invitación', texto: 'Cópialo a mano: <b>' + Render.escapar(texto) + '</b>' });
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(texto).then(hecho, aMano);
+        else aMano();
+        break;
+      }
+      case 'borrar-invitacion':
+        Gestor.borrarInvitacion(id);
+        recargar();
+        Dialogo.avisar('Código retirado: ya no sirve para entrar');
         break;
 
       case 'guardar-proyecto': {

@@ -23,6 +23,20 @@ r.post('/entrar', async (req, res) => {
   res.json(resultado);
 });
 
+/* Registro propio: el rol no se acepta en el cuerpo (lo fija REGISTRO_ROL).
+   Correo y contraseña se validan igual que cuando un administrador crea la cuenta. */
+const esquemaRegistro = z.object({
+  nombre: z.string().trim().max(200).optional(),
+  correo: D.correo,
+  clave: D.clave
+}).strip();
+
+r.post('/registrar', async (req, res) => {
+  const datos = validar(esquemaRegistro, req.body);
+  const resultado = await sesiones.registrar(datos, { ip: req.ip, agente: req.get('user-agent') });
+  res.status(201).json(resultado);
+});
+
 r.post('/salir', requerirSesion, async (req, res) => {
   await sesiones.salir(req.sesionId);
   res.status(204).end();

@@ -23,6 +23,10 @@ function lista(valor, porDefecto) {
 }
 
 let secreto = process.env.JWT_SECRETO;
+if ((!secreto || secreto.length < 32) && process.env.NODE_ENV === 'production') {
+  /* En línea, un secreto aleatorio cerraría todas las sesiones en cada reinicio */
+  throw new Error('JWT_SECRETO es obligatorio en producción (al menos 32 caracteres fijos en backend/.env).');
+}
 if (!secreto || secreto.length < 32) {
   secreto = crypto.randomBytes(48).toString('hex');
   if (process.env.NODE_ENV !== 'test') {
@@ -61,6 +65,15 @@ module.exports = {
   entorno: process.env.NODE_ENV || 'development',
   puerto: entero(process.env.PORT, 3000),
 
+  /* Detrás de Caddy o nginx, la IP real del visitante llega en X-Forwarded-For.
+     Sin esto, los límites por IP (acceso y registro) verían a todos como el proxy.
+     Valores: número de proxies delante (1), «loopback», o vacío si no hay proxy. */
+  confiarProxy: (() => {
+    const v = String(process.env.TRUST_PROXY || '').trim();
+    if (!v || v === 'false') return false;
+    return /^\d+$/.test(v) ? Number(v) : v;
+  })(),
+
   bd,
   bdAdmin,
 
@@ -91,5 +104,21 @@ module.exports = {
   acceso: {
     intentosMaximos: entero(process.env.LOGIN_INTENTOS, 10),
     ventanaMinutos: entero(process.env.LOGIN_VENTANA_MIN, 15)
+  },
+
+  /* Cuentas creadas por cada persona desde la pantalla de acceso */
+  registro: {
+    abierto: String(process.env.REGISTRO_ABIERTO || 'true').toLowerCase() !== 'false',
+    /* Director: quien se registra puede crear su proyecto y formar su equipo.
+       Nunca «admin»: un valor no admitido vuelve a director. */
+    rol: ['director', 'miembro', 'ejecutor'].includes(String(process.env.REGISTRO_ROL || '').trim())
+      ? String(process.env.REGISTRO_ROL).trim() : 'director',
+    /* Un aula entera suele salir a internet con una sola IP pública */
+    porHora: entero(process.env.REGISTRO_POR_HORA, 200)
+  },
+
+  invitaciones: {
+    intentosMaximos: entero(process.env.INVITACION_INTENTOS, 10),
+    ventanaMinutos: entero(process.env.INVITACION_VENTANA_MIN, 15)
   }
 };

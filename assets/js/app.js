@@ -16,6 +16,7 @@
      `p` son los segmentos tras el nombre de la ruta. */
   var RUTAS = {
     entrar:       { vista: function () { return VistasGestor.entrar(); }, publica: true },
+    registro:     { vista: function () { return VistasGestor.registro(); }, publica: true },
     clave:        { vista: function () { return VistasGestor.cambiarClave(); }, publica: true },
     panel:      { vista: function (p) { return VistasGestor.panel(p[0] === 'nuevo'); } },
     portafolios:  { vista: function () { return VistasGestor.portafolios(); } },
@@ -32,7 +33,7 @@
     principio:    { vista: function (p) { return Vistas.principio(p[0]); } }
   };
 
-  var DE_GESTOR = ['entrar', 'clave', 'panel', 'portafolios', 'agenda', 'eos', 'admin',
+  var DE_GESTOR = ['entrar', 'registro', 'clave', 'panel', 'portafolios', 'agenda', 'eos', 'admin',
                    'aprender', 'herramientas', 'artefactos'];
 
   function leerRuta() {
@@ -45,12 +46,12 @@
     var sesion = Gestor.haySesion();
 
     /* Una contraseña que otra persona conoce se cambia antes de nada.
-       Sin sesión solo existe la pantalla de acceso; con sesión, no. */
+       Sin sesión solo existen el acceso y el registro; con sesión, no. */
     if (Gestor.clavePendiente()) {
       if (ruta.nombre !== 'clave') { location.replace('#/clave'); return; }
     } else {
-      if (!sesion && ruta.nombre !== 'entrar') { location.replace('#/entrar'); return; }
-      if (sesion && (ruta.nombre === 'entrar' || ruta.nombre === 'clave' || !ruta.nombre)) {
+      if (!sesion && ruta.nombre !== 'entrar' && ruta.nombre !== 'registro') { location.replace('#/entrar'); return; }
+      if (sesion && (ruta.nombre === 'entrar' || ruta.nombre === 'registro' || ruta.nombre === 'clave' || !ruta.nombre)) {
         location.replace('#/panel'); return;
       }
     }
@@ -123,7 +124,7 @@
   function titulo(ruta) {
     var base = 'Gestor PMBOK® 8';
     var nombres = {
-      entrar: 'Acceso', clave: 'Cambiar contraseña', panel: 'Panel', portafolios: 'Portafolios', agenda: 'Agenda',
+      entrar: 'Acceso', registro: 'Crear cuenta', clave: 'Cambiar contraseña', panel: 'Panel', portafolios: 'Portafolios', agenda: 'Agenda',
       eos: 'EOS Gerencia', admin: 'Administración', aprender: 'Aprender',
       herramientas: 'Herramientas', artefactos: 'Artefactos', procesos: 'Los 40 procesos'
     };
