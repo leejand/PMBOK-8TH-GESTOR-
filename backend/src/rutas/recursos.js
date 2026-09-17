@@ -14,44 +14,74 @@ const express = require('express');
 const db = require('../db');
 const repo = require('../repositorio');
 const D = require('../definiciones');
+const alcance = require('../servicios/alcance');
 const { validar, limpiar } = require('../validacion');
-const { exigirProyecto, requerirGestion } = require('../middleware/auth');
-const { noEncontrado, prohibido } = require('../errores');
+const { exigirProyecto, requerirGestion, faltaNivel } = require('../middleware/auth');
+const { noEncontrado } = require('../errores');
 
-const NOMBRE_NIVEL = { 1: 'ver', 2: 'editar', 3: 'dirigir' };
-
-/* Carga el proyecto dueño de un registro y comprueba el nivel pedido */
+/* Carga el proyecto dueño de un registro y comprueba el nivel pedido.
+   Sin nivel pedido basta con cualquier acceso (también ejecutar). */
 async function proyectoDeRegistro(tabla, id, usuario, nivel, proyectoEsperado) {
   const fila = await db.uno('SELECT * FROM ' + tabla + ' WHERE id = $1', [id]);
   if (!fila || (proyectoEsperado && fila.proyecto_id !== proyectoEsperado)) {
     throw noEncontrado('No se encontró el registro.');
   }
-  const tiene = await exigirProyecto(usuario, fila.proyecto_id, 'ver');
-  if (nivel && tiene < D.NIVELES[nivel]) {
-    throw prohibido('Necesitas permiso de «' + nivel + '» en este proyecto; tienes «' + NOMBRE_NIVEL[tiene] + '».');
-  }
+  const tiene = await exigirProyecto(usuario, fila.proyecto_id, 'ejecutar');
+  if (nivel && tiene < D.NIVELES[nivel]) throw faltaNivel(nivel, tiene);
   return { fila, nivel: tiene, proyectoId: fila.proyecto_id };
 }
 
+/* ganchos.ejecutor — qué puede quien solo ejecuta:
+     coleccion         nombre en alcance.js (qué filas ve)
+     crear(req, pid, datos, cx)  → boolean (async)
+     modificar(req, reg, metodo) → boolean
+   Sin este gancho, el ejecutor no ve la colección. */
 function recursoDeProyecto(def, ganchos = {}) {
   const nivelEscritura = def.nivelEscritura || 'editar';
+  const requerido = D.NIVELES[nivelEscritura];
+  const ejecutor = ganchos.ejecutor || null;
+  const condicionEjecutor = ejecutor ? alcance.condicion(ejecutor.coleccion) : null;
   const salida = (o) => (ganchos.salida ? ganchos.salida(o) : o);
   const lista = express.Router({ mergeParams: true });
   const item = express.Router({ mergeParams: true });
 
+  async function visibleParaEjecutor(req, id) {
+    if (!condicionEjecutor) return false;
+    return !!(await db.uno('SELECT 1 FROM ' + def.tabla + ' t WHERE t.id = $1 AND ' + condicionEjecutor,
+      [id, req.usuario.id]));
+  }
+
+  /* Un ejecutor solo alcanza sus filas; el resto ni existe para él */
+  async function exigirAlcance(req, reg) {
+    if (!alcance.soloEjecuta(reg.nivel)) return;
+    if (!(await visibleParaEjecutor(req, reg.fila.id))) throw noEncontrado('No se encontró el registro.');
+  }
+
   lista.get('/', async (req, res) => {
-    await exigirProyecto(req.usuario, req.params.proyectoId, 'ver');
-    const filas = await repo.listar(def, { proyecto_id: req.params.proyectoId });
+    const pid = req.params.proyectoId;
+    const nivel = await exigirProyecto(req.usuario, pid, 'ejecutar');
+    let filas;
+    if (alcance.soloEjecuta(nivel)) {
+      if (!condicionEjecutor) throw faltaNivel('ver', nivel);
+      filas = await repo.listarDonde(def, 't.proyecto_id = $1 AND ' + condicionEjecutor, [pid, req.usuario.id]);
+    } else {
+      filas = await repo.listar(def, { proyecto_id: pid });
+    }
     res.json(filas.map(salida));
   });
 
   lista.post('/', async (req, res) => {
     const pid = req.params.proyectoId;
-    await exigirProyecto(req.usuario, pid, nivelEscritura);
+    const nivel = await exigirProyecto(req.usuario, pid, 'ejecutar');
+    const comoEjecutor = nivel < requerido;
+    if (comoEjecutor && !(alcance.soloEjecuta(nivel) && ejecutor && ejecutor.crear)) {
+      throw faltaNivel(nivelEscritura, nivel);
+    }
     const datos = limpiar(validar(def.esquemas.crear, req.body));
     const creado = ganchos.crear
       ? await ganchos.crear(req, pid, datos)
       : await db.transaccion(async (cx) => {
+        if (comoEjecutor && !(await ejecutor.crear(req, pid, datos, cx))) throw faltaNivel(nivelEscritura, nivel);
         if (ganchos.antesDeCrear) await ganchos.antesDeCrear(req, pid, datos, cx);
         const o = await repo.insertar(def, { ...datos, proyectoId: pid }, cx);
         if (ganchos.despues) await ganchos.despues(pid, cx);
@@ -60,25 +90,27 @@ function recursoDeProyecto(def, ganchos = {}) {
     res.status(201).json(salida(creado));
   });
 
-  /* Quién puede modificar un registro existente */
-  async function paraEscribir(req) {
+  /* Quién puede modificar o borrar un registro existente */
+  async function paraEscribir(req, metodo) {
     const r = await proyectoDeRegistro(def.tabla, req.params.id, req.usuario, null, req.params.proyectoId);
-    const permitido = ganchos.puedeModificar
-      ? ganchos.puedeModificar(req, r)
-      : r.nivel >= D.NIVELES[nivelEscritura];
-    if (!permitido) {
-      throw prohibido('Necesitas permiso de «' + nivelEscritura + '» en este proyecto; tienes «' + NOMBRE_NIVEL[r.nivel] + '».');
+    await exigirAlcance(req, r);
+    let permitido = ganchos.puedeModificar ? ganchos.puedeModificar(req, r) : r.nivel >= requerido;
+    if (!permitido && alcance.soloEjecuta(r.nivel) && ejecutor && ejecutor.modificar) {
+      permitido = ejecutor.modificar(req, r, metodo);
     }
+    if (!permitido) throw faltaNivel(nivelEscritura, r.nivel);
     return r;
   }
 
   item.get('/:id', async (req, res) => {
-    await proyectoDeRegistro(def.tabla, req.params.id, req.usuario, 'ver', req.params.proyectoId);
+    const r = await proyectoDeRegistro(def.tabla, req.params.id, req.usuario, null, req.params.proyectoId);
+    if (alcance.soloEjecuta(r.nivel) && !condicionEjecutor) throw faltaNivel('ver', r.nivel);
+    await exigirAlcance(req, r);
     res.json(salida(await repo.obtener(def, req.params.id)));
   });
 
   item.patch('/:id', async (req, res) => {
-    const r = await paraEscribir(req);
+    const r = await paraEscribir(req, 'PATCH');
     const cambios = limpiar(validar(def.esquemas.actualizar, req.body));
     const actualizado = await db.transaccion(async (cx) => {
       if (ganchos.antesDeActualizar) await ganchos.antesDeActualizar(req, r, cambios, cx);
@@ -90,7 +122,7 @@ function recursoDeProyecto(def, ganchos = {}) {
   });
 
   item.delete('/:id', async (req, res) => {
-    const r = await paraEscribir(req);
+    const r = await paraEscribir(req, 'DELETE');
     await db.transaccion(async (cx) => {
       await repo.borrar(def, req.params.id, cx);
       if (ganchos.despues) await ganchos.despues(r.proyectoId, cx);

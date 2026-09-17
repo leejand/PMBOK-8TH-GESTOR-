@@ -28,7 +28,7 @@ function esquemas(forma, requeridos) {
 
 const E = {
   roles: ['admin', 'director', 'miembro', 'ejecutor'],
-  nivelesPermiso: ['ver', 'editar', 'dirigir'],
+  nivelesPermiso: ['ejecutar', 'ver', 'editar', 'dirigir'],
   ambitos: ['portafolio', 'programa', 'proyecto'],
   metodologias: ['predictivo', 'agil', 'hibrido', 'kanban'],
   estadosProyecto: ['activo', 'pausa', 'cerrado', 'cancelado'],
@@ -41,10 +41,16 @@ const E = {
   estadosTarea: ['backlog', 'pendiente', 'curso', 'revision', 'hecho'],
   estadosSprint: ['planificado', 'activo', 'cerrado'],
   estadosRoca: ['encamino', 'riesgo', 'fuera', 'lograda'],
-  direcciones: ['mayor', 'menor']
+  direcciones: ['mayor', 'menor'],
+  /* A qué cuelga un comentario: el proyecto en general o uno de sus elementos */
+  refComentario: ['', 'proyecto', 'tarea', 'documento', 'proceso']
 };
 
-const NIVELES = { ver: 1, editar: 2, dirigir: 3 };
+/* Acceso efectivo a un proyecto (nivel_en en SQL):
+   0 sin acceso · 1 ejecutar · 2 ver · 3 editar · 4 dirigir.
+   Ejecutar es el alcance del ejecutor: sus tareas y la conversación. */
+const NIVELES = { ejecutar: 1, ver: 2, editar: 3, dirigir: 4 };
+const NOMBRE_NIVEL = { 0: 'sin acceso', 1: 'ejecutar', 2: 'ver', 3: 'editar', 4: 'dirigir' };
 
 /* ══════════════ Usuarios, permisos, portafolios ══════════════ */
 
@@ -256,7 +262,16 @@ const mediciones = {
 const comentarios = {
   tabla: 'comentarios',
   campos: [...DE_PROYECTO, ['autorId', 'autor_id'], ['refTipo', 'ref_tipo'], ['refId', 'ref_id'], ['texto', 'texto'], ...MARCAS],
-  esquemas: esquemas({ texto: v.textoRequerido(10000), refTipo: v.texto(40), refId: v.idNulo }, ['texto']),
+  esquemas: {
+    crear: z.object({
+      id: v.id.optional(), creado,
+      texto: v.textoRequerido(10000),
+      refTipo: z.enum(E.refComentario).optional(),
+      refId: v.idNulo.optional()
+    }),
+    /* Un comentario no cambia de sitio: solo se corrige su texto */
+    actualizar: z.object({ texto: v.textoRequerido(10000) }).partial()
+  },
   nivelEscritura: 'ver'
 };
 
@@ -322,7 +337,7 @@ const asientos = {
 };
 
 module.exports = {
-  E, NIVELES, correo, clave,
+  E, NIVELES, NOMBRE_NIVEL, correo, clave,
   usuarios, permisos, portafolios, programas, proyectos,
   miembros, riesgos, interesados, cambios, lecciones, sprints, tareas, mediciones, comentarios,
   procesosProyecto, documentos, archivos, rocas, metricas, asientos

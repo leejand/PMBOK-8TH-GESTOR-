@@ -46,20 +46,27 @@ function requerirRol(...roles) {
 /* Quién gestiona la estructura (portafolios, programas, EOS) y crea proyectos */
 const requerirGestion = requerirRol('admin', 'director');
 
-const NOMBRE_NIVEL = { 1: 'ver', 2: 'editar', 3: 'dirigir' };
+function faltaNivel(nivel, tiene) {
+  if (tiene === D.NIVELES.ejecutar) {
+    return prohibido('Tu acceso a este proyecto se limita a tus tareas y a la conversación.');
+  }
+  return prohibido('Necesitas permiso de «' + nivel + '» en este proyecto; tienes «' + D.NOMBRE_NIVEL[tiene] + '».');
+}
 
-/* Carga el proyecto y comprueba el nivel del usuario.
-   Si no puede ni verlo, responde 404: no revela que existe. */
+/* Carga el proyecto y comprueba el nivel del usuario (ejecutar, ver,
+   editar o dirigir). Si no tiene ningún acceso, responde 404: no
+   revela que existe. Devuelve el nivel efectivo. */
 async function exigirProyecto(usuario, proyectoId, nivel, cx) {
+  const requerido = D.NIVELES[nivel];
+  if (!requerido) throw new Error('Nivel desconocido: ' + nivel);
   const fila = await db.uno(
     'SELECT p.id, p.nombre, nivel_en(p.id, $2) AS nivel FROM proyectos p WHERE p.id = $1',
     [proyectoId, usuario.id], cx);
   if (!fila || fila.nivel < 1) throw noEncontrado('No existe el proyecto o no tienes acceso a él.');
-  const requerido = D.NIVELES[nivel] || 1;
-  if (fila.nivel < requerido) {
-    throw prohibido('Necesitas permiso de «' + nivel + '» en este proyecto; tienes «' + NOMBRE_NIVEL[fila.nivel] + '».');
-  }
+  if (fila.nivel < requerido) throw faltaNivel(nivel, fila.nivel);
   return fila.nivel;
 }
 
-module.exports = { requerirSesion, requerirSesionAunConClavePendiente, requerirRol, requerirGestion, exigirProyecto };
+module.exports = {
+  requerirSesion, requerirSesionAunConClavePendiente, requerirRol, requerirGestion, exigirProyecto, faltaNivel
+};

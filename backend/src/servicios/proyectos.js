@@ -262,17 +262,21 @@ async function matrizRiesgos(proyectoId) {
 
 /* ══════════════ Calendario ══════════════ */
 
-async function calendario(proyectoIds) {
-  if (!proyectoIds.length) return [];
+/* proyectos: [{ id, nivel }]. En los que solo ejecuta, el usuario ve las
+   fechas del proyecto, sus hitos y sprints y únicamente sus tareas. */
+async function calendario(proyectos, usuarioId) {
+  if (!proyectos.length) return [];
+  const proyectoIds = proyectos.map((p) => p.id);
+  const restringidos = proyectos.filter((p) => p.nivel === D.NIVELES.ejecutar).map((p) => p.id);
   const ev = [];
   const agrega = (fecha, tipo, titulo, ref, extra) => {
     if (fecha) ev.push({ fecha: String(fecha).slice(0, 10), tipo, titulo, ref, extra: extra || '' });
   };
 
-  const proyectos = await db.varios(
+  const filas = await db.varios(
     'SELECT id, nombre, inicio, fin, hitos FROM proyectos WHERE id = ANY($1::text[])', [proyectoIds]);
   const nombres = {};
-  proyectos.forEach((p) => {
+  filas.forEach((p) => {
     nombres[p.id] = p.nombre;
     agrega(p.inicio, 'proyecto', 'Inicio · ' + p.nombre, p.id);
     agrega(p.fin, 'proyecto', 'Fin previsto · ' + p.nombre, p.id);
@@ -280,9 +284,14 @@ async function calendario(proyectoIds) {
   });
 
   const [tareas, sprints, mediciones] = await Promise.all([
-    db.varios('SELECT proyecto_id, titulo, fecha_limite, estado FROM tareas WHERE proyecto_id = ANY($1::text[]) AND fecha_limite IS NOT NULL', [proyectoIds]),
+    db.varios(
+      `SELECT proyecto_id, titulo, fecha_limite, estado FROM tareas
+       WHERE proyecto_id = ANY($1::text[]) AND fecha_limite IS NOT NULL
+         AND (NOT proyecto_id = ANY($2::text[]) OR responsable_id = $3)`,
+      [proyectoIds, restringidos, usuarioId || null]),
     db.varios('SELECT proyecto_id, nombre, inicio, fin FROM sprints WHERE proyecto_id = ANY($1::text[])', [proyectoIds]),
-    db.varios('SELECT proyecto_id, fecha FROM mediciones WHERE proyecto_id = ANY($1::text[])', [proyectoIds])
+    db.varios('SELECT proyecto_id, fecha FROM mediciones WHERE proyecto_id = ANY($1::text[]) AND NOT proyecto_id = ANY($2::text[])',
+      [proyectoIds, restringidos])
   ]);
   tareas.forEach((t) => agrega(t.fecha_limite, 'tarea', t.titulo, t.proyecto_id, t.estado));
   sprints.forEach((s) => {
@@ -318,7 +327,9 @@ async function visibles(usuario) {
 
 async function panel(usuario) {
   const proyectos = await visibles(usuario);
-  const ids = proyectos.map((p) => p.id);
+  /* Documentos y siguiente paso son del plan: solo donde se ve el plan */
+  const conPlan = proyectos.filter((p) => p.nivel >= D.NIVELES.ver);
+  const ids = conPlan.map((p) => p.id);
   const docs = ids.length
     ? await db.uno('SELECT count(*) AS n FROM documentos WHERE proyecto_id = ANY($1::text[])', [ids])
     : { n: 0 };
@@ -326,7 +337,7 @@ async function panel(usuario) {
   const activos = proyectos.filter((p) => p.estado === 'activo');
 
   const siguientes = [];
-  for (const p of activos) {
+  for (const p of activos.filter((x) => x.nivel >= D.NIVELES.ver)) {
     siguientes.push({ proyectoId: p.id, nombre: p.nombre, porcentaje: p.progreso.porcentaje, siguiente: await siguiente(p.id) });
   }
 

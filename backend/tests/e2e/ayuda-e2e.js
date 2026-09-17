@@ -51,4 +51,39 @@ async function api(page, metodo, ruta, cuerpo) {
   }, { metodo, ruta, cuerpo });
 }
 
-module.exports = { ADMIN, asegurarAdmin, entrar, entrarComoAdmin, esperarGuardado, api };
+/* Llamadas a la API fuera de la página, con el token que se indique */
+async function tokenDe(request, correo, clave) {
+  const r = await request.post('/api/auth/entrar', { data: { correo, clave } });
+  expect(r.status(), 'entrar como ' + correo).toBe(200);
+  return (await r.json()).token;
+}
+
+async function llamar(request, token, metodo, ruta, cuerpo) {
+  const r = await request.fetch('/api' + ruta, {
+    method: metodo,
+    headers: { Authorization: 'Bearer ' + token },
+    data: cuerpo
+  });
+  return { estado: r.status(), datos: r.status() === 204 ? null : await r.json() };
+}
+
+async function tokenAdmin(request) {
+  await asegurarAdmin(request);
+  return tokenDe(request, ADMIN.correo, ADMIN.propia);
+}
+
+/* Cuenta lista para entrar: la crea el administrador y su dueño ya eligió contraseña */
+async function crearCuenta(request, admin, { nombre, correo, rol = 'miembro', clave }) {
+  const temporal = 'temporal-' + Date.now();
+  const r = await llamar(request, admin, 'POST', '/usuarios', { nombre, correo, rol, clave: temporal });
+  expect(r.estado, JSON.stringify(r.datos)).toBe(201);
+  const suyo = await tokenDe(request, correo, temporal);
+  const cambio = await llamar(request, suyo, 'PUT', '/auth/clave', { actual: temporal, nueva: clave });
+  expect(cambio.estado).toBe(200);
+  return r.datos.id;
+}
+
+module.exports = {
+  ADMIN, asegurarAdmin, entrar, entrarComoAdmin, esperarGuardado, api,
+  tokenDe, tokenAdmin, llamar, crearCuenta
+};

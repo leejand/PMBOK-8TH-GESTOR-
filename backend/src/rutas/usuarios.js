@@ -28,10 +28,10 @@ usuarios.get('/', async (_req, res) => {
 
 usuarios.get('/roles', (_req, res) => {
   res.json([
-    { id: 'admin', nombre: 'Administrador', descripcion: 'Ve y edita todo; gestiona usuarios y permisos.' },
-    { id: 'director', nombre: 'Director de proyecto', descripcion: 'Crea y dirige proyectos propios.' },
-    { id: 'miembro', nombre: 'Miembro de equipo', descripcion: 'Trabaja en los proyectos donde se le asigna.' },
-    { id: 'ejecutor', nombre: 'Ejecutor', descripcion: 'Ve sus tareas y comenta; no edita planes.' }
+    { id: 'admin', nombre: 'Administrador', descripcion: 'Ve y edita todo; gestiona usuarios, permisos, datos y copias de seguridad.' },
+    { id: 'director', nombre: 'Director de proyecto', descripcion: 'Crea proyectos y dirige los suyos; edita la cartera y la gerencia (EOS).' },
+    { id: 'miembro', nombre: 'Miembro de equipo', descripcion: 'Trabaja en los proyectos donde lo suman al equipo o le dan permiso.' },
+    { id: 'ejecutor', nombre: 'Ejecutor', descripcion: 'Ve y mueve sus tareas y conversa con el equipo; no ve ni edita los planes.' }
   ]);
 });
 

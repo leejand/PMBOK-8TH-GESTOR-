@@ -70,7 +70,7 @@ describe('HU-11 Estado para la interfaz y seguridad básica', () => {
     assert.equal(s.formato, 'pmbok8-gestor');
     assert.equal(s.sesion.usuarioId, dir.usuario.id);
     assert.equal(s.usuario.id, dir.usuario.id);
-    assert.deepEqual(s.proyectos.map((p) => [p.nombre, p.nivel]), [['Mío', 3]]);
+    assert.deepEqual(s.proyectos.map((p) => [p.nombre, p.nivel]), [['Mío', 4]]);
     assert.deepEqual(s.riesgos.map((x) => x.titulo), ['Visible']);
     assert.equal(s.sprints.length, 1);
     assert.equal(s.sprints[0].nombre, 'Sprint 0 — Preparación');
@@ -87,7 +87,7 @@ describe('HU-11 Estado para la interfaz y seguridad básica', () => {
     assert.deepEqual(s.permisos, [], 'un director no ve los permisos de otros');
 
     const delOtro = (await otro.get('/api/estado')).datos;
-    assert.deepEqual(delOtro.proyectos.map((p) => [p.nombre, p.nivel]).sort(), [['Ajeno', 3], ['Mío', 1]]);
+    assert.deepEqual(delOtro.proyectos.map((p) => [p.nombre, p.nivel]).sort(), [['Ajeno', 4], ['Mío', 2]]);
     assert.equal(delOtro.permisos.length, 1, 've sus propios permisos');
     const delAdmin = (await e.admin.get('/api/estado')).datos;
     assert.equal(delAdmin.proyectos.length, 2);

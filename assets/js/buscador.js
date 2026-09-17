@@ -97,7 +97,8 @@ window.Buscador = (function () {
 
     var m = (location.hash || '').match(/^#\/proyectos\/([^\/]+)/);
     var abierto = m ? Gestor.proyecto(m[1]) : null;
-    if (abierto) {
+    /* Las fichas de proceso son parte del plan: no para quien solo ejecuta */
+    if (abierto && !Gestor.soloEjecuta(abierto.id)) {
       (PMBOK.procesos || []).forEach(function (pc) {
         var est = Gestor.estadoProceso(abierto.id, pc.id).estado;
         salida.push(preparar({

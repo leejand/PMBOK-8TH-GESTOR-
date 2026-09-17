@@ -28,7 +28,7 @@ describe('HU-03 Proyectos', () => {
     assert.equal(p.presupuesto, 150000);
     assert.equal(p.moneda, 'COP');
     assert.equal(p.estado, 'activo');
-    assert.equal(p.nivel, 3);
+    assert.equal(p.nivel, 4);
     assert.deepEqual(p.fases.map((f) => f.nombre),
       ['Sprint 0 — Preparación', 'Sprints de desarrollo (iterativos)', 'Release']);
     assert.deepEqual(p.progreso, { completados: 0, omitidos: 0, total: 40, aplicables: 40, porcentaje: 0 });
@@ -106,7 +106,7 @@ describe('HU-03 Proyectos', () => {
       dod: ['Probado', 'Revisado']
     });
     assert.equal(hitos.estado, 200);
-    assert.equal(hitos.datos.nivel, 2);
+    assert.equal(hitos.datos.nivel, 3);
     assert.equal(hitos.datos.hitos.length, 2);
     assert.ok(hitos.datos.hitos.every((h) => h.id), 'cada hito recibe identificador');
     assert.equal(hitos.datos.hitos[1].fecha, null);
@@ -145,7 +145,7 @@ describe('HU-03 Proyectos', () => {
     assert.equal((await ajeno.del('/api/proyectos/' + p.id)).estado, 404);
     assert.equal((await ajeno.get('/api/proyectos/' + p.id + '/riesgos')).estado, 404);
     assert.ok(!(await ajeno.get('/api/proyectos')).datos.some((x) => x.id === p.id));
-    assert.equal((await e.admin.get('/api/proyectos/' + p.id)).datos.nivel, 3, 'el administrador lo ve todo');
+    assert.equal((await e.admin.get('/api/proyectos/' + p.id)).datos.nivel, 4, 'el administrador lo ve todo');
   });
 
   it('CA-09 borrar un proyecto elimina en cascada todo lo que contiene', async () => {

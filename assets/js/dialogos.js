@@ -16,11 +16,19 @@ window.Dialogo = (function () {
 
   /* ══════════════ Modal ══════════════ */
 
+  var alCerrar = null;
+
   function cerrar() {
     if (!capa) return;
     var c = capa;
+    var despues = alCerrar;
     capa = null;
+    alCerrar = null;
+    if (despues) setTimeout(despues, 0);
     c.classList.remove('abierto');
+    /* Mientras sale ya no cuenta: ni para el foco ni para quien lea la página */
+    c.setAttribute('aria-hidden', 'true');
+    c.inert = true;
     /* Se retira cuando termina la transición de salida */
     setTimeout(function () {
       if (c.parentNode) c.parentNode.removeChild(c);
@@ -150,6 +158,23 @@ window.Dialogo = (function () {
     });
   }
 
+  /* ── Contenido propio (un hilo, un código…) ──────────── */
+  /* opc: { eyebrow, titulo, texto, html, cerrar, ancho }; alMontar(capa) conecta lo de dentro */
+  function mostrar(opc, alMontar) {
+    var html = cabecera(opc) + '<div class="d-cuerpo">' + (opc.html || '') + '</div>' +
+      '<div class="d-pie"><button class="btn" data-d="cerrar">' + R.escapar(opc.cerrar || 'Cerrar') + '</button></div>';
+    abrir(html, function (c) {
+      alCerrar = opc.alCerrar || null;
+      if (opc.ancho) c.querySelector('.d-panel').classList.add('ancho');
+      c.querySelector('[data-d="cerrar"]').addEventListener('click', cerrar);
+      if (alMontar) alMontar(c);
+      var primero = c.querySelector('textarea, input, [data-d="cerrar"]');
+      if (primero) primero.focus();
+    });
+  }
+
+  function abierto() { return !!capa; }
+
   /* ══════════════ Avisos efímeros ══════════════ */
 
   function pila() {
@@ -198,6 +223,8 @@ window.Dialogo = (function () {
     confirmar: confirmar,
     pedir: pedir,
     informar: informar,
+    mostrar: mostrar,
+    abierto: abierto,
     avisar: avisar,
     cerrar: cerrar
   };

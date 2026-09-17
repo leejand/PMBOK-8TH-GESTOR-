@@ -4,7 +4,10 @@
    La interfaz la carga al entrar y trabaja sobre ella en memoria,
    así sus pantallas siguen siendo síncronas. Tiene la misma forma
    que la base del navegador (colecciones en camelCase), filtrada:
-     · proyectos con nivel ≥ 1 y todo lo que cuelga de ellos;
+     · proyectos con algún acceso y lo que cuelga de ellos; donde el
+       usuario solo ejecuta, únicamente lo que alcance.js le permite
+       (sus tareas, sprints, equipo, conversación y el estado de los
+       procesos sin sus notas);
      · usuarios (sin contraseñas), cartera y EOS completos;
      · permisos: todos para un administrador, los propios para el resto.
    ═══════════════════════════════════════════════════════════ */
@@ -14,6 +17,7 @@
 const db = require('../db');
 const repo = require('../repositorio');
 const D = require('../definiciones');
+const alcance = require('./alcance');
 
 const DE_PROYECTO = [
   ['miembros', D.miembros], ['procesos', D.procesosProyecto], ['documentos', D.documentos],
@@ -32,8 +36,12 @@ async function estado(usuario) {
     `SELECT t.*, n.nivel FROM proyectos t
      CROSS JOIN LATERAL (SELECT nivel_en(t.id, $1) AS nivel) n
      WHERE n.nivel > 0 ORDER BY t.creado`, [usuario.id]);
-  const proyectos = filas.map((f) => ({ ...repo.aObjeto(D.proyectos, f), nivel: f.nivel }));
-  const ids = proyectos.map((p) => p.id);
+  const proyectos = filas.map((f) => {
+    const p = { ...repo.aObjeto(D.proyectos, f), nivel: f.nivel };
+    return alcance.soloEjecuta(f.nivel) ? alcance.recortarProyecto(p) : p;
+  });
+  const completos = proyectos.filter((p) => !alcance.soloEjecuta(p.nivel)).map((p) => p.id);
+  const restringidos = proyectos.filter((p) => alcance.soloEjecuta(p.nivel)).map((p) => p.id);
 
   const salida = {
     version: 1,
@@ -45,7 +53,15 @@ async function estado(usuario) {
   };
 
   for (const [nombre, def] of DE_PROYECTO) {
-    salida[nombre] = await repo.listarEn(def, 'proyecto_id', ids);
+    const lista = await repo.listarEn(def, 'proyecto_id', completos);
+    const condicion = alcance.condicion(nombre);
+    if (restringidos.length && condicion) {
+      const suyas = await repo.listarDonde(def,
+        't.proyecto_id = ANY($1::text[]) AND ' + condicion, [restringidos, usuario.id]);
+      /* Las notas de un proceso son parte del plan */
+      lista.push(...(nombre === 'procesos' ? suyas.map((x) => ({ ...x, notas: '' })) : suyas));
+    }
+    salida[nombre] = lista;
   }
   for (const [nombre, def] of GLOBALES) {
     salida[nombre] = await repo.listar(def, {});

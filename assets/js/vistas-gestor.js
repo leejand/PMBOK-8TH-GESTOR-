@@ -108,7 +108,7 @@ window.VistasGestor = (function () {
     var proyectos = Gestor.proyectosVisibles();
     var docs = 0, procesosOk = 0;
     proyectos.forEach(function (p) {
-      docs += Gestor.documentosDe(p.id).length;
+      if (!Gestor.soloEjecuta(p.id)) docs += Gestor.documentosDe(p.id).length;
       procesosOk += Gestor.progreso(p.id).completados;
     });
     var activos = proyectos.filter(function (p) { return p.estado === 'activo'; }).length;
@@ -152,6 +152,8 @@ window.VistasGestor = (function () {
     var s = Gestor.salud(p.id);
     var port = p.portafolioId ? Gestor.uno('portafolios', p.portafolioId) : null;
     var director = p.directorId ? Gestor.uno('usuarios', p.directorId) : null;
+    var ejecuta = Gestor.soloEjecuta(p.id);
+    var abiertas = ejecuta ? Gestor.tareasDe(p.id).filter(function (t) { return t.estado !== 'hecho'; }).length : 0;
 
     return '<a class="g-proyecto" href="#/proyectos/' + p.id + '">' +
       '<div class="g-proyecto-cab">' +
@@ -167,12 +169,14 @@ window.VistasGestor = (function () {
         UI.anillo(pr.porcentaje) +
       '</div>' +
       (p.descripcion ? '<div class="g-proyecto-desc">' + R.escapar(p.descripcion.slice(0, 130)) + '</div>' : '') +
-      siguientePaso(p) +
+      (ejecuta
+        ? '<div class="g-siguiente"><span>Mis tareas</span><b>' + abiertas + (abiertas === 1 ? ' abierta' : ' abiertas') + '</b></div>'
+        : siguientePaso(p)) +
       bandasProyecto(p) +
       '<div class="g-proyecto-pie">' +
         '<span>' + Iconos.svg('flujo') + pr.completados + '/' + pr.aplicables + ' procesos</span>' +
-        '<span>' + Iconos.svg('documento') + Gestor.documentosDe(p.id).length + '</span>' +
-        (s.estado !== 'sin-datos' ? UI.pastilla(s.etiqueta, s.estado) : '') +
+        (ejecuta ? '' : '<span>' + Iconos.svg('documento') + Gestor.documentosDe(p.id).length + '</span>') +
+        (!ejecuta && s.estado !== 'sin-datos' ? UI.pastilla(s.etiqueta, s.estado) : '') +
         '<span class="g-proyecto-director">' + UI.avatar(director ? director.nombre : '?') +
           R.escapar(director ? director.nombre : 'sin director') + '</span>' +
       '</div>' +
@@ -736,7 +740,10 @@ window.VistasGestor = (function () {
         ? UI.fila([
             UI.selector('perm-ambito', 'Conceder acceso a', ambitos, ambitos[0].id),
             UI.selector('perm-nivel', 'Nivel', [
-              { id: 'ver', nombre: 'Ver' }, { id: 'editar', nombre: 'Editar' }, { id: 'dirigir', nombre: 'Dirigir' }
+              { id: 'ejecutar', nombre: 'Ejecutar · solo sus tareas y la conversación' },
+              { id: 'ver', nombre: 'Ver · todo, sin cambiar nada' },
+              { id: 'editar', nombre: 'Editar · procesos, documentos y registros' },
+              { id: 'dirigir', nombre: 'Dirigir · además configuración y equipo' }
             ], 'ver')
           ]) +
           '<input type="hidden" id="perm-usuario" value="' + usuarioId + '">' +

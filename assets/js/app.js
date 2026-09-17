@@ -194,7 +194,7 @@
       '<div class="arbol-titulo" title="' + Render.escapar(pr.nombre) + '">' + Render.escapar(pr.nombre) + '</div>' +
       '<div class="arbol-avance">' + UI.barra(prog.porcentaje) +
         '<span>' + prog.completados + '/' + prog.aplicables + '</span></div>' +
-      VistasObra.pestanas.map(function (t) {
+      VistasObra.pestanasDe(pr).map(function (t) {
         return enlace('#/proyectos/' + pr.id + '/' + t.id, '', t.nombre, t.id);
       }).join('') + '</div>';
   }
@@ -226,7 +226,9 @@
        proceso pertenecen al flujo; la ficha de un documento, a Documentos. */
     var m = actual.match(/^#\/proyectos\/([^\/]+)(?:\/(proceso|documento)\/.*)?$/);
     if (m) {
-      var pestana = m[2] === 'documento' ? 'documentos' : 'flujo';
+      var abierto = Gestor.proyecto(m[1]);
+      var pestana = m[2] === 'documento' ? 'documentos'
+        : m[2] ? 'flujo' : (abierto ? VistasObra.pestanaInicial(abierto) : 'flujo');
       var destino = arbol.querySelector('[data-ruta="#/proyectos/' + m[1] + '/' + pestana + '"]');
       if (destino) mejor = destino;
     }

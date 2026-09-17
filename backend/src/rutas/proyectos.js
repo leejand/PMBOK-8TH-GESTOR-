@@ -13,6 +13,8 @@ const D = require('../definiciones');
 const svc = require('../servicios/proyectos');
 const trabajo = require('../servicios/trabajo');
 const docs = require('../servicios/documentos');
+const alcance = require('../servicios/alcance');
+const catalogo = require('../catalogo');
 const { z, validar, limpiar, id: esquemaId } = require('../validacion');
 const { exigirProyecto, requerirGestion } = require('../middleware/auth');
 const { recursoDeProyecto, proyectoDeRegistro } = require('./recursos');
@@ -30,13 +32,17 @@ r.get('/', async (req, res) => {
 r.post('/', requerirGestion, async (req, res) => {
   const datos = limpiar(validar(D.proyectos.esquemas.crear, req.body));
   const p = await svc.crear(req.usuario, datos);
-  res.status(201).json({ ...p, nivel: 3, progreso: await svc.progreso(p.id) });
+  res.status(201).json({ ...p, nivel: D.NIVELES.dirigir, progreso: await svc.progreso(p.id) });
 });
 
 r.get(P, async (req, res) => {
   const pid = req.params.proyectoId;
-  const nivel = await exigirProyecto(req.usuario, pid, 'ver');
+  const nivel = await exigirProyecto(req.usuario, pid, 'ejecutar');
   const p = await repo.obtener(D.proyectos, pid);
+  if (alcance.soloEjecuta(nivel)) {
+    res.json({ ...alcance.recortarProyecto(p), nivel, progreso: await svc.progreso(pid) });
+    return;
+  }
   res.json({ ...p, nivel, progreso: await svc.progreso(pid), siguiente: await svc.siguiente(pid) });
 });
 
@@ -58,7 +64,7 @@ r.delete(P, async (req, res) => {
 /* ══════════════ Procesos del ciclo de vida ══════════════ */
 
 r.get(P + '/progreso', async (req, res) => {
-  await exigirProyecto(req.usuario, req.params.proyectoId, 'ver');
+  await exigirProyecto(req.usuario, req.params.proyectoId, 'ejecutar');
   res.json(await svc.progreso(req.params.proyectoId));
 });
 
@@ -112,18 +118,19 @@ for (const tipo of ['entradas', 'salidas']) {
 
 /* ══════════════ Indicadores ══════════════ */
 
+/* [nivel mínimo, lectura]; el calendario de un ejecutor solo lleva sus tareas */
 const lecturas = {
-  evm: (pid) => svc.evm(pid),
-  salud: (pid) => svc.salud(pid),
-  'matriz-riesgos': (pid) => svc.matrizRiesgos(pid),
-  calendario: (pid) => svc.calendario([pid]),
-  velocidad: (pid) => trabajo.velocidad(pid),
-  'sprint-activo': async (pid) => ({ sprint: await trabajo.sprintActivo(pid) })
+  evm: ['ver', (pid) => svc.evm(pid)],
+  salud: ['ver', (pid) => svc.salud(pid)],
+  'matriz-riesgos': ['ver', (pid) => svc.matrizRiesgos(pid)],
+  calendario: ['ejecutar', (pid, req, nivel) => svc.calendario([{ id: pid, nivel }], req.usuario.id)],
+  velocidad: ['ejecutar', (pid) => trabajo.velocidad(pid)],
+  'sprint-activo': ['ejecutar', async (pid) => ({ sprint: await trabajo.sprintActivo(pid) })]
 };
-Object.entries(lecturas).forEach(([ruta, fn]) => {
+Object.entries(lecturas).forEach(([ruta, [nivelMinimo, fn]]) => {
   r.get(P + '/' + ruta, async (req, res) => {
-    await exigirProyecto(req.usuario, req.params.proyectoId, 'ver');
-    res.json(await fn(req.params.proyectoId));
+    const nivel = await exigirProyecto(req.usuario, req.params.proyectoId, nivelMinimo);
+    res.json(await fn(req.params.proyectoId, req, nivel));
   });
 });
 
@@ -194,20 +201,59 @@ r.post(P + '/archivos',
 
 const conSeveridad = (x) => ({ ...x, severidad: svc.severidad(x.p, x.i) });
 const fotografiar = (pid, cx) => trabajo.fotografiarProyecto(pid, cx);
+const soloLectura = (coleccion) => ({ coleccion });
+
+/* A qué cuelga un comentario: debe existir en el mismo proyecto */
+async function referenciaComentario(pid, datos, cx) {
+  const tipo = datos.refTipo || '';
+  if (tipo === '' || tipo === 'proyecto') {
+    datos.refTipo = tipo;
+    datos.refId = null;
+    return null;
+  }
+  if (!datos.refId) throw peticionInvalida('Indica «refId»: el elemento que se comenta.');
+  if (tipo === 'proceso') {
+    if (!catalogo.cargar().flujoPorId[datos.refId]) throw peticionInvalida('El proceso comentado no existe.');
+    return null;
+  }
+  const tabla = tipo === 'tarea' ? 'tareas' : 'documentos';
+  const fila = await db.uno('SELECT * FROM ' + tabla + ' WHERE id = $1', [datos.refId], cx);
+  if (!fila || fila.proyecto_id !== pid) throw peticionInvalida('El elemento comentado no existe en este proyecto.');
+  return fila;
+}
 
 const recursos = {
-  miembros: recursoDeProyecto(D.miembros),
+  miembros: recursoDeProyecto(D.miembros, { ejecutor: soloLectura('miembros') }),
   riesgos: recursoDeProyecto(D.riesgos, { salida: conSeveridad }),
   interesados: recursoDeProyecto(D.interesados),
   cambios: recursoDeProyecto(D.cambios),
   lecciones: recursoDeProyecto(D.lecciones),
   mediciones: recursoDeProyecto(D.mediciones),
   comentarios: recursoDeProyecto(D.comentarios, {
-    antesDeCrear: async (req, _pid, datos) => { datos.autorId = req.usuario.id; },
+    antesDeCrear: async (req, pid, datos, cx) => {
+      await referenciaComentario(pid, datos, cx);
+      datos.autorId = req.usuario.id;
+    },
     /* Cada cual edita lo suyo; editores y directores, cualquiera */
-    puedeModificar: (req, reg) => reg.fila.autor_id === req.usuario.id || reg.nivel >= D.NIVELES.editar
+    puedeModificar: (req, reg) => reg.fila.autor_id === req.usuario.id || reg.nivel >= D.NIVELES.editar,
+    /* Un ejecutor conversa sobre el proyecto en general y sobre sus tareas */
+    ejecutor: {
+      coleccion: 'comentarios',
+      crear: async (req, pid, datos, cx) => {
+        const ref = await referenciaComentario(pid, datos, cx);
+        return datos.refTipo === '' || datos.refTipo === 'proyecto' ||
+          (datos.refTipo === 'tarea' && ref && ref.responsable_id === req.usuario.id);
+      }
+    }
   }),
   tareas: recursoDeProyecto(D.tareas, {
+    /* Un ejecutor mueve sus tareas por el tablero y nada más */
+    ejecutor: {
+      coleccion: 'tareas',
+      modificar: (req, reg, metodo) => metodo === 'PATCH' &&
+        reg.fila.responsable_id === req.usuario.id &&
+        Object.keys(req.body || {}).every((k) => k === 'estado' || k === '$antes')
+    },
     antesDeCrear: async (_req, pid, datos, cx) => {
       if (datos.prioridad === undefined) {
         const n = await db.uno('SELECT count(*) AS n FROM tareas WHERE proyecto_id = $1', [pid], cx);
@@ -217,6 +263,7 @@ const recursos = {
     despues: fotografiar
   }),
   sprints: recursoDeProyecto(D.sprints, {
+    ejecutor: soloLectura('sprints'),
     crear: async (_req, pid, datos) => {
       const { sprint, cerrado } = await trabajo.crearSprint(pid, datos);
       return { ...sprint, sprintCerrado: cerrado };

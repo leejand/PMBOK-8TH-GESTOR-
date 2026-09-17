@@ -73,6 +73,13 @@ async function listar(def, filtro, cx) {
   return filas.map((f) => aObjeto(def, f));
 }
 
+/* Filas que cumplen una condición escrita en el código (alias t) */
+async function listarDonde(def, condicionSql, valores, cx) {
+  const sql = selectBase(def) + ' WHERE ' + condicionSql + ' ORDER BY ' + (def.orden || 't.creado');
+  const filas = await db.varios(sql, valores, cx);
+  return filas.map((f) => aObjeto(def, f));
+}
+
 /* Filas cuya columna está en la lista (p. ej. todos los riesgos de varios proyectos) */
 async function listarEn(def, columna, valores, cx) {
   if (!valores.length) return [];
@@ -113,4 +120,6 @@ async function borrar(def, id, cx) {
   return r.rowCount > 0;
 }
 
-module.exports = { aObjeto, aColumnas, obtener, listar, listarEn, insertar, insertarSimple, actualizar, borrar };
+module.exports = {
+  aObjeto, aColumnas, selectBase, obtener, listar, listarDonde, listarEn, insertar, insertarSimple, actualizar, borrar
+};

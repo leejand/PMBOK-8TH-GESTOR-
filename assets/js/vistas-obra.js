@@ -18,31 +18,57 @@ window.VistasObra = (function () {
     { id: 'archivos', nombre: 'Archivos' },
     { id: 'calendario', nombre: 'Calendario' },
     { id: 'trabajo', nombre: 'Trabajo' },
+    { id: 'conversacion', nombre: 'Conversación' },
     { id: 'dominios', nombre: 'Dominios' },
     { id: 'control', nombre: 'Control (EVM)' },
     { id: 'equipo', nombre: 'Equipo' },
     { id: 'calidad', nombre: 'Calidad del plan' }
   ];
 
+  /* Quien solo ejecuta ve sus tareas, las fechas y la conversación */
+  var PESTANAS_EJECUTOR = [
+    { id: 'trabajo', nombre: 'Mis tareas' },
+    { id: 'calendario', nombre: 'Calendario' },
+    { id: 'conversacion', nombre: 'Conversación' }
+  ];
+
+  function pestanasDe(p) {
+    return Gestor.soloEjecuta(p.id) ? PESTANAS_EJECUTOR : PESTANAS;
+  }
+
+  function pestanaInicial(p) {
+    return Gestor.soloEjecuta(p.id) ? 'trabajo' : 'flujo';
+  }
+
   /* ══════════════ Envoltorio ══════════════ */
 
   function vista(id, sub, arg) {
     var p = Gestor.proyecto(id);
     if (!p) return Vistas.noEncontrado();
-    if (!Gestor.puede(p.id, 'ver')) {
+    if (!Gestor.puede(p.id, 'ejecutar')) {
       return '<div class="hoja">' + UI.vacio('🔒', 'Sin acceso a este proyecto',
         'Pide al director del proyecto o a un administrador que te conceda permiso.') + '</div>';
+    }
+
+    var ejecuta = Gestor.soloEjecuta(p.id);
+    var permitida = !sub || PESTANAS_EJECUTOR.some(function (t) { return t.id === sub; });
+    if (ejecuta && !permitida) {
+      return '<div class="hoja-ancha prosa">' + cabecera(p, '') +
+        UI.vacio('🔒', 'Esta sección es parte del plan del proyecto',
+          'Con tu rol ves tus tareas, el calendario y la conversación del equipo. ' +
+          '<a class="ref" href="#/proyectos/' + p.id + '/trabajo">Ir a mis tareas</a>.') + '</div>';
     }
 
     if (sub === 'proceso') return fichaProceso(p, arg);
     if (sub === 'documento') return editorDocumento(p, arg);
 
-    var pestana = sub || 'flujo';
+    var pestana = sub || pestanaInicial(p);
     var cuerpo =
       pestana === 'documentos' ? tabDocumentos(p) :
       pestana === 'archivos' ? tabArchivos(p) :
       pestana === 'calendario' ? tabCalendario(p, arg) :
       pestana === 'trabajo' ? tabTrabajo(p, arg) :
+      pestana === 'conversacion' ? tabConversacion(p) :
       pestana === 'dominios' ? tabDominios(p, arg) :
       pestana === 'control' ? tabControl(p) :
       pestana === 'equipo' ? tabEquipo(p) :
@@ -55,8 +81,9 @@ window.VistasObra = (function () {
     var met = Gestor.metodologia(p.metodologia);
     var pr = Gestor.progreso(p.id);
     var director = p.directorId ? Gestor.uno('usuarios', p.directorId) : null;
+    var ejecuta = Gestor.soloEjecuta(p.id);
 
-    var pestanas = PESTANAS.map(function (t) {
+    var pestanas = pestanasDe(p).map(function (t) {
       return '<a class="g-pestana-obra' + (t.id === pestana ? ' activa' : '') + '" ' +
         'href="#/proyectos/' + p.id + '/' + t.id + '">' + t.nombre + '</a>';
     }).join('');
@@ -79,12 +106,16 @@ window.VistasObra = (function () {
         '<span><b>' + pr.completados + ' de ' + pr.aplicables + '</b>procesos completados</span>' +
       '</div>' +
       '</div>' +
-      siguientePaso(p, pestana !== 'flujo') +
-      /* La adaptación se lee una vez: abierta en el flujo, plegada en el resto */
-      '<details class="g-adaptacion"' + (pestana === 'flujo' ? ' open' : '') + '>' +
-        '<summary><span>Adaptación</span> ' + R.escapar(met.nombre) + '</summary>' +
-        '<p>' + met.tailoring + '</p>' +
-      '</details>' +
+      (ejecuta
+        ? '<div class="nota g-nota-ejecutor"><div class="nota-titulo">Tu participación</div>' +
+          'Ves las tareas asignadas a ti, las fechas del proyecto y la conversación del equipo. ' +
+          'Mueve tus tareas por el tablero a medida que avanzas y comenta dudas o bloqueos en cada una.</div>'
+        : siguientePaso(p, pestana !== 'flujo') +
+          /* La adaptación se lee una vez: abierta en el flujo, plegada en el resto */
+          '<details class="g-adaptacion"' + (pestana === 'flujo' ? ' open' : '') + '>' +
+            '<summary><span>Adaptación</span> ' + R.escapar(met.nombre) + '</summary>' +
+            '<p>' + met.tailoring + '</p>' +
+          '</details>') +
       '<nav class="g-pestanas-obra" aria-label="Secciones del proyecto">' + pestanas + '</nav>';
   }
 
@@ -270,6 +301,11 @@ window.VistasObra = (function () {
       (puede ? '' : ' disabled') + '>' + R.escapar(est.notas || '') + '</textarea>' +
       (puede ? '<div class="tarjeta-pie"><button class="btn primario" data-o="guardar-notas">Guardar notas</button>' +
         '<span class="nota-guardada" id="g-aviso-notas"></span></div>' : '') +
+
+      Comentarios.hilo(p.id, 'proceso', procesoId, {
+        titulo: 'Conversación sobre este proceso',
+        vacio: 'Sin comentarios. Pregunta aquí lo que no esté claro o avisa de un bloqueo.'
+      }) +
 
       '<h2>Referencia completa del proceso</h2>' +
       '<p style="color:var(--tinta-2);font-size:13.4px">La ficha de estudio con su descripción, su ITTO detallado y ' +
@@ -473,6 +509,11 @@ window.VistasObra = (function () {
       '<input type="hidden" id="g-doc-id" value="' + d.id + '">' +
       '<div class="pa-campos">' + bloques + '</div>' +
 
+      Comentarios.hilo(p.id, 'documento', d.id, {
+        titulo: 'Revisión y comentarios',
+        vacio: 'Sin comentarios. Deja aquí las observaciones de la revisión del documento.'
+      }) +
+
       '<nav class="nav-secuencia">' +
         '<a href="#/proyectos/' + p.id + '/documentos"><div class="dir">← Volver</div>' +
         '<div class="tit">Documentos del proyecto</div></a>' +
@@ -566,6 +607,7 @@ window.VistasObra = (function () {
   /* ══════════════ 7 · TRABAJO ══════════════ */
 
   function tabTrabajo(p, sub) {
+    if (Gestor.soloEjecuta(p.id)) return misTareas(p);
     var met = Gestor.metodologia(p.metodologia);
     if (met.id === 'agil' || met.id === 'hibrido') return trabajoAgil(p, sub);
     return trabajoTablero(p, met);
@@ -687,17 +729,63 @@ window.VistasObra = (function () {
       '</div>';
   }
 
+  var SIGUIENTE_ESTADO = { backlog: 'pendiente', pendiente: 'curso', curso: 'revision', revision: 'hecho', hecho: 'pendiente' };
+
   function tarjetaTarea(p, t) {
     var u = t.responsableId ? Gestor.uno('usuarios', t.responsableId) : null;
-    var siguiente = { pendiente: 'curso', curso: 'revision', revision: 'hecho', hecho: 'pendiente' }[t.estado];
-    return '<div class="g-tarea" draggable="true" data-tarea="' + t.id + '">' +
+    var mueve = Gestor.puedeMoverTarea(t);
+    var siguiente = SIGUIENTE_ESTADO[t.estado] || 'pendiente';
+    var nombreSig = (Gestor.estadosTarea.filter(function (e) { return e.id === siguiente; })[0] || {}).nombre || siguiente;
+    var n = Comentarios.cuantos(p.id, 'tarea', t.id);
+    return '<div class="g-tarea"' + (mueve ? ' draggable="true"' : '') + ' data-tarea="' + t.id + '">' +
       '<div class="g-tarea-titulo">' + R.escapar(t.titulo) + '</div>' +
       '<div class="g-tarea-pie">' +
         '<span class="g-puntos">' + (t.puntos || '—') + '</span>' +
         (u ? UI.avatar(u.nombre) : '') +
         (t.fechaLimite ? '<span class="g-tarea-fecha">' + UI.fecha(t.fechaLimite) + '</span>' : '') +
-        '<button class="pa-mini" data-o="avanzar-tarea" data-id="' + t.id + '" data-valor="' + siguiente + '">→</button>' +
+        '<button class="g-tarea-com' + (n ? ' con' : '') + '" data-o="hilo-tarea" data-id="' + t.id + '" ' +
+          'title="Comentarios" aria-label="Comentarios de la tarea: ' + n + '">' +
+          Iconos.svg('comentario') + (n ? '<span>' + n + '</span>' : '') + '</button>' +
+        (mueve
+          ? '<button class="pa-mini" data-o="avanzar-tarea" data-id="' + t.id + '" data-valor="' + siguiente + '" ' +
+            'title="Pasar a «' + R.escapar(nombreSig) + '»" aria-label="Pasar a ' + R.escapar(nombreSig) + '">→</button>'
+          : '') +
       '</div></div>';
+  }
+
+  /* ── Lo que ve quien solo ejecuta: sus tareas en un tablero ── */
+  function misTareas(p) {
+    var met = Gestor.metodologia(p.metodologia);
+    var sprint = (met.id === 'agil' || met.id === 'hibrido') ? Gestor.sprintActivo(p.id) : null;
+    var tareas = Gestor.tareasDe(p.id);
+    if (!tareas.length) {
+      return '<h2>Mis tareas</h2>' + UI.vacio('trabajo', 'No tienes tareas asignadas',
+        'Cuando te asignen trabajo en este proyecto aparecerá aquí. Mientras tanto puedes seguir la ' +
+        '<a class="ref" href="#/proyectos/' + p.id + '/conversacion">conversación del equipo</a>.');
+    }
+    var abiertas = tareas.filter(function (t) { return t.estado !== 'hecho'; }).length;
+    var columnas = Gestor.estadosTarea.filter(function (c) {
+      return c.id !== 'backlog' || tareas.some(function (t) { return t.estado === 'backlog'; });
+    });
+
+    var tablero = '<div class="g-tablero">' + columnas.map(function (c) {
+      var suyas = tareas.filter(function (t) { return t.estado === c.id; });
+      return '<div class="g-columna" data-columna="' + c.id + '">' +
+        '<div class="g-columna-cab">' + c.nombre + ' <span>' + suyas.length + '</span></div>' +
+        suyas.map(function (t) { return tarjetaTarea(p, t); }).join('') +
+        '</div>';
+    }).join('') + '</div>';
+
+    return '<h2>Mis tareas <span class="pa-conteo">' + tareas.length + '</span></h2>' +
+      '<p class="g-intro-tareas">' + abiertas + (abiertas === 1 ? ' tarea abierta' : ' tareas abiertas') +
+      (sprint ? ' · Sprint activo: <b>' + R.escapar(sprint.nombre) + '</b>' +
+        (sprint.objetivo ? ' — ' + R.escapar(sprint.objetivo.replace(/[.\s]+$/, '')) : '') : '') +
+      '. Arrastra una tarjeta o usa <b>→</b> para avanzarla.</p>' +
+      tablero +
+      (sprint && p.dod && p.dod.length
+        ? '<div class="g-dod"><div class="g-et">Definition of Done</div><ul>' +
+          p.dod.map(function (x) { return '<li>' + R.escapar(x) + '</li>'; }).join('') + '</ul></div>'
+        : '');
   }
 
   function ceremonias(p, sprint) {
@@ -797,6 +885,19 @@ window.VistasObra = (function () {
         : '') +
       tablero +
       (puede ? '<h2>Nueva tarea</h2>' + formularioHistoria(p) : '');
+  }
+
+  /* ══════════════ CONVERSACIÓN ══════════════ */
+
+  function tabConversacion(p) {
+    return '<p class="g-intro-tareas">La conversación general del equipo: acuerdos, avisos y dudas. ' +
+      'Lo que se comenta en una tarea, un documento o un proceso se escribe en su ficha y aparece también aquí abajo.</p>' +
+      Comentarios.hilo(p.id, 'proyecto', null, {
+        titulo: 'Conversación del equipo',
+        vacio: 'Nadie ha escrito todavía. Empieza tú: un acuerdo, un aviso o una pregunta.'
+      }) +
+      '<h2>Actividad en tareas, documentos y procesos</h2>' +
+      Comentarios.actividad(p.id, 20);
   }
 
   /* ══════════════ 8 · DOMINIOS ══════════════ */
@@ -1189,12 +1290,12 @@ window.VistasObra = (function () {
     var met = Gestor.metodologia(p.metodologia);
 
     var ROLES_PROYECTO = [
-      { id: 'lider', nombre: 'Líder de proyecto' },
-      { id: 'po', nombre: 'Product Owner' },
-      { id: 'sm', nombre: 'Scrum Master' },
-      { id: 'equipo', nombre: 'Equipo de desarrollo' },
-      { id: 'ejecutor', nombre: 'Ejecutor' },
-      { id: 'observador', nombre: 'Observador' }
+      { id: 'lider', nombre: 'Líder de proyecto', alcance: 'Dirige: configuración, metodología, fases y equipo.' },
+      { id: 'po', nombre: 'Product Owner', alcance: 'Edita el proyecto: procesos, documentos, backlog y registros.' },
+      { id: 'sm', nombre: 'Scrum Master', alcance: 'Edita el proyecto, igual que el Product Owner.' },
+      { id: 'equipo', nombre: 'Equipo de desarrollo', alcance: 'Edita el proyecto, igual que el Product Owner.' },
+      { id: 'observador', nombre: 'Observador', alcance: 'Ve todo el proyecto y comenta; no cambia nada.' },
+      { id: 'ejecutor', nombre: 'Ejecutor', alcance: 'Ve y mueve solo sus tareas y conversa; no ve los planes.' }
     ];
 
     var listaMiembros = miembros.map(function (m) {
@@ -1235,11 +1336,14 @@ window.VistasObra = (function () {
               return { id: u.id, nombre: u.nombre + ' · ' + u.correo }; }), candidatos[0].id),
             UI.selector('nmb-rol', 'Rol en el proyecto', ROLES_PROYECTO, 'equipo')
           ]) +
-          '<div class="tarjeta-pie"><button class="btn primario" data-o="agregar-miembro">Agregar miembro</button>' +
-          '<span class="pa-aviso-inline">Los miembros pueden editar el proyecto; el líder además puede dirigirlo.</span></div>' +
+          '<div class="tarjeta-pie"><button class="btn primario" data-o="agregar-miembro">Agregar miembro</button></div>' +
           '</div>'
         : (puede ? '<p style="color:var(--tinta-3);font-size:13.2px">Todas las cuentas activas ya son miembros. ' +
             'Crea más desde <a class="ref" href="#/admin">Administración</a>.</p>' : '')) +
+      '<details class="g-adaptacion"><summary><span>Roles</span> Qué puede hacer cada rol en el equipo</summary>' +
+        R.tabla(['Rol', 'Alcance'], ROLES_PROYECTO.map(function (r) { return [r.nombre, r.alcance]; })) +
+        '<p>Una cuenta con el rol general <b>Ejecutor</b> se queda en su alcance aunque tenga otro rol aquí.</p>' +
+      '</details>' +
 
       '<h2>Configuración del proyecto</h2>' +
       (puede
@@ -1344,6 +1448,8 @@ window.VistasObra = (function () {
   return {
     vista: vista,
     pestanas: PESTANAS,
+    pestanasDe: pestanasDe,
+    pestanaInicial: pestanaInicial,
     tarjetaProceso: tarjetaProceso
   };
 })();

@@ -94,20 +94,20 @@ describe('HU-02 Usuarios, roles y permisos', () => {
     assert.equal(pVer.estado, 201);
     const visto = await m.get('/api/proyectos/' + pr.id);
     assert.equal(visto.estado, 200);
-    assert.equal(visto.datos.nivel, 1);
+    assert.equal(visto.datos.nivel, 2);
     const hitoProhibido = await m.patch('/api/proyectos/' + pr.id, { hitos: [{ nombre: 'Go-live' }] });
     assert.equal(hitoProhibido.estado, 403);
     assert.match(hitoProhibido.datos.error, /editar/);
 
     await e.admin.post('/api/permisos', { usuarioId: m.usuario.id, ambito: 'proyecto', refId: pr.id, nivel: 'editar' });
-    assert.equal((await m.get('/api/proyectos/' + pr.id)).datos.nivel, 2, 'ver + editar = editar');
+    assert.equal((await m.get('/api/proyectos/' + pr.id)).datos.nivel, 3, 'ver + editar = editar');
     assert.equal((await m.patch('/api/proyectos/' + pr.id, { hitos: [{ nombre: 'Go-live' }] })).estado, 200);
     assert.equal((await m.patch('/api/proyectos/' + pr.id, { nombre: 'Otro' })).estado, 403, 'renombrar exige dirigir');
 
     const subir = await e.admin.post('/api/permisos', { usuarioId: m.usuario.id, ambito: 'portafolio', refId: pf.id, nivel: 'dirigir' });
     assert.equal(subir.estado, 200, 'conceder de nuevo el mismo ámbito cambia el nivel');
     assert.equal(subir.datos.id, pVer.datos.id);
-    assert.equal((await m.get('/api/proyectos/' + pr.id)).datos.nivel, 3);
+    assert.equal((await m.get('/api/proyectos/' + pr.id)).datos.nivel, 4);
 
     const suyos = await e.admin.get('/api/permisos?usuarioId=' + m.usuario.id);
     assert.equal(suyos.datos.length, 2);

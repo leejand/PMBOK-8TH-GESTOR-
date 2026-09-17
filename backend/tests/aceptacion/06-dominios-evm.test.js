@@ -152,10 +152,11 @@ describe('HU-06 Dominios de desempeño y valor ganado', () => {
   });
 
   it('CA-11 quien solo ve puede comentar, y cada cual edita sus comentarios', async () => {
-    const lector = await e.crearUsuario('ejecutor');
+    const lector = await e.crearUsuario('miembro');
     await e.admin.post('/api/permisos', { usuarioId: lector.usuario.id, ambito: 'proyecto', refId: p.id, nivel: 'ver' });
+    const tarea = (await dir.post(base + '/tareas', { titulo: 'Recibir los paneles' })).datos;
 
-    const mio = await lector.post(base + '/comentarios', { texto: '¿Cuándo llegan los paneles?', refTipo: 'tarea' });
+    const mio = await lector.post(base + '/comentarios', { texto: '¿Cuándo llegan los paneles?', refTipo: 'tarea', refId: tarea.id });
     assert.equal(mio.estado, 201);
     assert.equal(mio.datos.autorId, lector.usuario.id);
     const suyo = (await dir.post(base + '/comentarios', { texto: 'La semana próxima', autorId: lector.usuario.id })).datos;
@@ -182,7 +183,7 @@ describe('HU-06 Dominios de desempeño y valor ganado', () => {
 
     const ascenso = await dir.patch('/api/miembros/' + alta.datos.id, { rol: 'lider' });
     assert.equal(ascenso.datos.rol, 'lider');
-    assert.equal((await m.get(base)).datos.nivel, 3, 'el líder dirige');
+    assert.equal((await m.get(base)).datos.nivel, 4, 'el líder dirige');
     assert.equal((await dir.del('/api/miembros/' + alta.datos.id)).estado, 204);
     assert.equal((await m.get(base)).estado, 404);
   });

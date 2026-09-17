@@ -143,7 +143,7 @@ describe('HU-09 Exportar, importar y reiniciar', () => {
   it('CA-04 el proyecto importado conserva estructura, cálculo y relaciones', async () => {
     const ana = await e.entrar('ana@empresa.co', 'ana-segura-1');
     const p = (await ana.get('/api/proyectos/pro-lx1-1')).datos;
-    assert.equal(p.nivel, 3);
+    assert.equal(p.nivel, 4);
     assert.equal(p.creado, T0);
     assert.equal(p.portafolioId, 'por-1');
     assert.equal(p.programaId, 'pro-1');

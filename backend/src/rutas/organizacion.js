@@ -124,7 +124,7 @@ general.get('/panel', async (req, res) => {
 
 general.get('/calendario', async (req, res) => {
   const visibles = await svc.visibles(req.usuario);
-  res.json(await svc.calendario(visibles.map((p) => p.id)));
+  res.json(await svc.calendario(visibles, req.usuario.id));
 });
 
 /* ══════════════ Catálogo (público) ══════════════ */

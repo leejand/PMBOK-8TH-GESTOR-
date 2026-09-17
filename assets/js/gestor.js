@@ -458,15 +458,18 @@ window.Gestor = (function () {
   }
 
   var ROLES = [
-    { id: 'admin', nombre: 'Administrador', descripcion: 'Ve y edita todo; gestiona usuarios y permisos.' },
-    { id: 'director', nombre: 'Director de proyecto', descripcion: 'Crea y dirige proyectos propios.' },
-    { id: 'miembro', nombre: 'Miembro de equipo', descripcion: 'Trabaja en los proyectos donde se le asigna.' },
-    { id: 'ejecutor', nombre: 'Ejecutor', descripcion: 'Ve sus tareas y comenta; no edita planes.' }
+    { id: 'admin', nombre: 'Administrador', descripcion: 'Ve y edita todo; gestiona usuarios, permisos, datos y copias de seguridad.' },
+    { id: 'director', nombre: 'Director de proyecto', descripcion: 'Crea proyectos y dirige los suyos; edita la cartera y la gerencia (EOS).' },
+    { id: 'miembro', nombre: 'Miembro de equipo', descripcion: 'Trabaja en los proyectos donde lo suman al equipo o le dan permiso.' },
+    { id: 'ejecutor', nombre: 'Ejecutor', descripcion: 'Ve y mueve sus tareas y conversa con el equipo; no ve ni edita los planes.' }
   ];
 
   /* ══════════════ Permisos ══════════════ */
 
-  var NIVELES = { ver: 1, editar: 2, dirigir: 3 };
+  /* 0 sin acceso · 1 ejecutar (sus tareas y la conversación) · 2 ver ·
+     3 editar · 4 dirigir. Igual que nivel_en() en el servidor. */
+  var NIVELES = { ejecutar: 1, ver: 2, editar: 3, dirigir: 4 };
+  var NIVEL_MIEMBRO = { lider: 4, po: 3, sm: 3, equipo: 3, observador: 2, ejecutor: 1 };
 
   function permisosDe(usuarioId) {
     return lista('permisos', { usuarioId: usuarioId });
@@ -495,16 +498,15 @@ window.Gestor = (function () {
   function nivelEn(proyectoId, usuarioId) {
     var actual = usuarioActual();
     var u = usuarioId ? uno('usuarios', usuarioId) : actual;
-    if (!u) return 0;
+    if (!u || u.activo === false) return 0;
     if (u.rol === 'admin') return NIVELES.dirigir;
 
     var p = uno('proyectos', proyectoId);
     if (!p) return 0;
     /* En modo servidor, el nivel propio lo calcula la base de datos */
     if (enServidor() && actual && u.id === actual.id && typeof p.nivel === 'number') return p.nivel;
-    if (p.directorId === u.id) return NIVELES.dirigir;
 
-    var max = 0;
+    var max = p.directorId === u.id ? NIVELES.dirigir : 0;
     permisosDe(u.id).forEach(function (perm) {
       var aplica =
         (perm.ambito === 'proyecto' && perm.refId === proyectoId) ||
@@ -514,13 +516,27 @@ window.Gestor = (function () {
     });
 
     var m = lista('miembros', { proyectoId: proyectoId }).filter(function (x) { return x.usuarioId === u.id; })[0];
-    if (m) max = Math.max(max, m.rol === 'lider' ? NIVELES.dirigir : NIVELES.editar);
+    if (m) max = Math.max(max, NIVEL_MIEMBRO[m.rol] || NIVELES.editar);
 
-    return max;
+    /* Quien tiene el rol de ejecutor nunca pasa de ejecutar */
+    return u.rol === 'ejecutor' ? Math.min(max, NIVELES.ejecutar) : max;
   }
 
   function puede(proyectoId, nivel) {
-    return nivelEn(proyectoId) >= (NIVELES[nivel] || 1);
+    return nivelEn(proyectoId) >= (NIVELES[nivel] || NIVELES.ver);
+  }
+
+  /* Solo sus tareas y la conversación: el alcance del ejecutor */
+  function soloEjecuta(proyectoId) {
+    return nivelEn(proyectoId) === NIVELES.ejecutar;
+  }
+
+  /* ¿Puede mover esta tarea por el tablero? */
+  function puedeMoverTarea(tarea) {
+    if (!tarea) return false;
+    if (puede(tarea.proyectoId, 'editar')) return true;
+    var u = usuarioActual();
+    return soloEjecuta(tarea.proyectoId) && !!u && tarea.responsableId === u.id;
   }
 
   /* Proyectos visibles para el usuario actual */
@@ -940,6 +956,10 @@ window.Gestor = (function () {
 
   function tareasDe(proyectoId, filtro) {
     var t = lista('tareas', { proyectoId: proyectoId });
+    if (soloEjecuta(proyectoId)) {
+      var yo = (usuarioActual() || {}).id;
+      t = t.filter(function (x) { return x.responsableId === yo; });
+    }
     if (filtro && filtro.sprintId !== undefined) {
       t = t.filter(function (x) { return (x.sprintId || null) === filtro.sprintId; });
     }
@@ -1055,6 +1075,66 @@ window.Gestor = (function () {
     return { nivel: 'bajo', etiqueta: 'Bajo', color: 'ok' };
   }
 
+  /* ══════════════ Comentarios ══════════════ */
+
+  function esGeneral(c) { return !c.refTipo || c.refTipo === 'proyecto'; }
+
+  /* Lo que alcanza un ejecutor: lo general y lo de sus tareas. En modo
+     servidor ya llega filtrado; en modo local se filtra aquí. */
+  function comentarioVisible(c) {
+    if (!soloEjecuta(c.proyectoId)) return true;
+    if (esGeneral(c)) return true;
+    if (c.refTipo !== 'tarea') return false;
+    var t = uno('tareas', c.refId);
+    return !!t && t.responsableId === (usuarioActual() || {}).id;
+  }
+
+  /* refTipo: 'proyecto' (la conversación general), 'tarea', 'documento',
+     'proceso', o nada para todos los del proyecto. Del más antiguo al más nuevo. */
+  function comentariosDe(proyectoId, refTipo, refId) {
+    return lista('comentarios', { proyectoId: proyectoId }).filter(function (c) {
+      if (!comentarioVisible(c)) return false;
+      if (refTipo === undefined) return true;
+      if (refTipo === 'proyecto') return esGeneral(c);
+      return c.refTipo === refTipo && c.refId === refId;
+    }).sort(function (a, b) { return (a.creado || 0) - (b.creado || 0); });
+  }
+
+  function puedeComentar(proyectoId, refTipo, refId) {
+    if (puede(proyectoId, 'ver')) return true;
+    if (!soloEjecuta(proyectoId)) return false;
+    if (!refTipo || refTipo === 'proyecto') return true;
+    var t = refTipo === 'tarea' ? uno('tareas', refId) : null;
+    return !!t && t.responsableId === (usuarioActual() || {}).id;
+  }
+
+  function puedeModificarComentario(c) {
+    var u = usuarioActual();
+    return !!u && !!c && (c.autorId === u.id || puede(c.proyectoId, 'editar'));
+  }
+
+  function comentar(proyectoId, texto, refTipo, refId) {
+    var limpio = String(texto || '').trim();
+    if (!limpio) return { error: 'Escribe el comentario antes de publicarlo.' };
+    if (!puedeComentar(proyectoId, refTipo, refId)) return { error: 'Tu rol no permite comentar aquí.' };
+    var general = !refTipo || refTipo === 'proyecto';
+    return {
+      comentario: crear('comentarios', {
+        proyectoId: proyectoId, texto: limpio,
+        refTipo: general ? 'proyecto' : refTipo, refId: general ? null : refId,
+        autorId: (usuarioActual() || {}).id || null
+      })
+    };
+  }
+
+  function editarComentario(id, texto) {
+    var limpio = String(texto || '').trim();
+    if (!limpio) return { error: 'El comentario no puede quedar vacío.' };
+    var c = uno('comentarios', id);
+    if (!puedeModificarComentario(c)) return { error: 'Solo su autor o quien edita el proyecto puede cambiarlo.' };
+    return { comentario: actualizar('comentarios', id, { texto: limpio }) };
+  }
+
   /* ══════════════ Calendario ══════════════ */
 
   function eventosDe(proyectoId) {
@@ -1068,19 +1148,22 @@ window.Gestor = (function () {
 
     var proyectos = proyectoId ? [p].filter(Boolean) : proyectosVisibles();
     proyectos.forEach(function (pr) {
+      var ejecuta = soloEjecuta(pr.id);
       agrega(pr.inicio, 'proyecto', 'Inicio · ' + pr.nombre, pr.id);
       agrega(pr.fin, 'proyecto', 'Fin previsto · ' + pr.nombre, pr.id);
 
-      lista('tareas', { proyectoId: pr.id }).forEach(function (t) {
+      tareasDe(pr.id).forEach(function (t) {
         if (t.fechaLimite) agrega(t.fechaLimite, 'tarea', t.titulo, pr.id, t.estado);
       });
       lista('sprints', { proyectoId: pr.id }).forEach(function (s) {
         if (s.inicio) agrega(s.inicio, 'sprint', 'Inicio ' + s.nombre, pr.id);
         if (s.fin) agrega(s.fin, 'sprint', 'Fin ' + s.nombre, pr.id);
       });
-      lista('mediciones', { proyectoId: pr.id }).forEach(function (m) {
-        agrega(m.fecha, 'evm', 'Corte de valor ganado · ' + pr.nombre, pr.id);
-      });
+      if (!ejecuta) {
+        lista('mediciones', { proyectoId: pr.id }).forEach(function (m) {
+          agrega(m.fecha, 'evm', 'Corte de valor ganado · ' + pr.nombre, pr.id);
+        });
+      }
       (pr.hitos || []).forEach(function (h) {
         agrega(h.fecha, 'hito', h.nombre, pr.id, h.critico ? 'critico' : '');
       });
@@ -1251,6 +1334,7 @@ window.Gestor = (function () {
     /* permisos */
     permisosDe: permisosDe, conceder: conceder, revocar: revocar,
     nivelEn: nivelEn, puede: puede, proyectosVisibles: proyectosVisibles,
+    soloEjecuta: soloEjecuta, puedeMoverTarea: puedeMoverTarea, niveles: NIVELES,
     /* proyectos */
     crearProyecto: crearProyecto, proyecto: proyecto, borrarProyecto: borrarProyecto,
     borrarPortafolio: borrarPortafolio,
@@ -1272,6 +1356,9 @@ window.Gestor = (function () {
     registrarBurndown: registrarBurndown, burndown: burndown,
     /* dominios */
     matrizRiesgos: matrizRiesgos, severidad: severidad,
+    /* comentarios */
+    comentariosDe: comentariosDe, comentar: comentar, editarComentario: editarComentario,
+    puedeComentar: puedeComentar, puedeModificarComentario: puedeModificarComentario,
     /* calendario */
     eventosDe: eventosDe,
     /* eos */

@@ -25,7 +25,9 @@ window.ObraAcciones = (function () {
     conectarTablas();
     conectarArchivos();
     conectarArrastre();
-    if (window.Graficos) Graficos.conectar(document.getElementById('contenido'));
+    var contenido = document.getElementById('contenido');
+    if (window.Graficos) Graficos.conectar(contenido);
+    Comentarios.conectar(contenido, function () { recargar(); });
   }
 
   /* Borrado de algo pequeño: se hace al instante y se ofrece deshacer.
@@ -499,6 +501,10 @@ window.ObraAcciones = (function () {
         recargar();
         break;
       }
+
+      case 'hilo-tarea':
+        Comentarios.abrirTarea(proyectoId, id, function () { recargar(); });
+        break;
 
       case 'avanzar-tarea':
         Gestor.actualizar('tareas', id, { estado: val });
