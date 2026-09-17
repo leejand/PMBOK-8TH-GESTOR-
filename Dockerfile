@@ -14,6 +14,11 @@ COPY assets ./assets
 COPY backend ./backend
 
 WORKDIR /app/backend
+
+# Dentro de un contenedor hay que escuchar en todas las interfaces: por
+# defecto el servidor solo atiende al bucle local y nadie lo alcanzaría.
+# El puerto lo fija quien despliega (PORT); 3000 es el valor por defecto.
+ENV HOST=0.0.0.0
 EXPOSE 3000
 
 CMD ["node", "src/servidor.js"]

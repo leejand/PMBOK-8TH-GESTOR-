@@ -34,17 +34,47 @@ if (!secreto || secreto.length < 32) {
   }
 }
 
-const nombreBd = process.env.PGDATABASE || 'pmbok8';
-if (!/^[a-z_][a-z0-9_]{0,62}$/.test(nombreBd)) {
-  throw new Error('PGDATABASE solo admite minúsculas, dígitos y guion bajo: ' + nombreBd);
+/* Los servicios gestionados (Railway, Render, Neon…) entregan una sola URL
+   de conexión en vez de las variables PG* sueltas. */
+function desdeUrl(url) {
+  const u = new URL(url);
+  const texto = (x) => (x ? decodeURIComponent(x) : '');
+  return {
+    host: u.hostname,
+    port: entero(u.port, 5432),
+    user: texto(u.username),
+    password: texto(u.password),
+    database: texto(u.pathname.replace(/^\//, ''))
+  };
 }
 
+const urlBd = process.env.DATABASE_URL || '';
+const partes = urlBd ? desdeUrl(urlBd) : {};
+
+const nombreBd = partes.database || process.env.PGDATABASE || 'pmbok8';
+if (!/^[a-z_][a-z0-9_-]{0,62}$/i.test(nombreBd)) {
+  throw new Error('El nombre de la base solo admite letras, dígitos, guion y guion bajo: ' + nombreBd);
+}
+
+/* Fuera de la propia máquina, PostgreSQL gestionado exige TLS. Su certificado
+   no lo firma una CA pública, así que se cifra sin verificarlo; el tráfico va
+   por la red privada del proveedor. Con PGSSL se fuerza o se desactiva. */
+const anfitrion = partes.host || process.env.PGHOST || 'localhost';
+const esLocal = /^(localhost|127\.|::1|\[::1\]|0\.0\.0\.0)/.test(anfitrion);
+const ssl = (function () {
+  const v = String(process.env.PGSSL || '').trim().toLowerCase();
+  if (['false', 'off', '0', 'no'].indexOf(v) !== -1) return false;
+  if (['true', 'on', '1', 'si', 'sí'].indexOf(v) !== -1) return { rejectUnauthorized: false };
+  return esLocal ? false : { rejectUnauthorized: false };
+})();
+
 const bd = {
-  host: process.env.PGHOST || 'localhost',
-  port: entero(process.env.PGPORT, 5432),
-  user: process.env.PGUSER || 'postgres',
-  password: process.env.PGPASSWORD || '',
+  host: anfitrion,
+  port: partes.port || entero(process.env.PGPORT, 5432),
+  user: partes.user || process.env.PGUSER || 'postgres',
+  password: partes.password || process.env.PGPASSWORD || '',
   database: nombreBd,
+  ssl: ssl,
   max: entero(process.env.PGPOOL_MAX, 10),
   application_name: 'pmbok8-backend'
 };

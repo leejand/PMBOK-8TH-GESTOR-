@@ -52,19 +52,28 @@ async function asegurarRol(admin) {
 
 async function asegurarBaseDatos({ reiniciar = false } = {}) {
   const nombre = config.bd.database;
-  return conAdmin('postgres', async (admin) => {
-    if (rolPropio()) await asegurarRol(admin);
-    if (reiniciar) {
-      await admin.query(`DROP DATABASE IF EXISTS "${nombre}" WITH (FORCE)`);
-    }
-    const existe = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [nombre]);
-    if (!existe.rowCount) {
-      await admin.query(`CREATE DATABASE "${nombre}" ENCODING 'UTF8' TEMPLATE template0`);
-      await admin.query(`REVOKE ALL ON DATABASE "${nombre}" FROM PUBLIC`);
-      return true;
-    }
+  try {
+    return await conAdmin('postgres', async (admin) => {
+      if (rolPropio()) await asegurarRol(admin);
+      if (reiniciar) {
+        await admin.query(`DROP DATABASE IF EXISTS "${nombre}" WITH (FORCE)`);
+      }
+      const existe = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [nombre]);
+      if (!existe.rowCount) {
+        await admin.query(`CREATE DATABASE "${nombre}" ENCODING 'UTF8' TEMPLATE template0`);
+        await admin.query(`REVOKE ALL ON DATABASE "${nombre}" FROM PUBLIC`);
+        return true;
+      }
+      return false;
+    });
+  } catch (err) {
+    /* Un PostgreSQL gestionado entrega la base ya creada y no siempre deja
+       entrar a «postgres». Si la de trabajo responde, no hay nada que crear. */
+    if (reiniciar) throw err;
+    await conAdmin(nombre, (cx) => cx.query('SELECT 1'));
+    console.log('[bd] la base «' + nombre + '» ya existe (no se pudo consultar «postgres»: ' + err.message + ')');
     return false;
-  });
+  }
 }
 
 async function aplicarMigraciones() {

@@ -1,15 +1,85 @@
-# Despliegue en línea (VPS)
+# Despliegue en línea
 
 Guía para publicar el Gestor en una URL como `https://pmbok8.midominio.com`, de modo que cada
 compañero cree su cuenta, forme su equipo y trabaje sobre la misma base de datos.
 
+Hay dos caminos, y los dos funcionan:
+
+| | [Contenedor en un PaaS](#a-contenedor-en-un-paas-railway-render) | [VPS propio](#b-vps-propio) |
+|---|---|---|
+| Qué hay que administrar | Nada: el proveedor construye y ejecuta | El servidor entero |
+| HTTPS | Incluido | Lo pone Caddy |
+| Base de datos | Gestionada por el proveedor | PostgreSQL local |
+| Coste orientativo | Gratis para probar, ~5 USD/mes real | 4-6 EUR/mes |
+| Copias de seguridad | Las del proveedor | Hay que programarlas |
+
+---
+
+## A · Contenedor en un PaaS (Railway, Render)
+
+El repositorio trae `Dockerfile`: el proveedor lo construye y ejecuta sin más. La aplicación
+acepta la `DATABASE_URL` que entregan estos servicios, activa TLS sola cuando la base es remota
+y aplica las migraciones al arrancar **sin necesitar un superusuario**: si no se define
+`PGADMIN_USER`, trabaja con la cuenta que da el proveedor sobre la base que ya viene creada.
+
+### 1. Subir el repositorio a GitHub
+
+```bash
+git push origin main
+```
+
+### 2. Crear el servicio
+
+1. Crea un proyecto en [railway.app](https://railway.app) o [render.com](https://render.com).
+2. Añade una base **PostgreSQL** desde el propio panel.
+3. Añade un servicio **desde el repositorio de GitHub**; al detectar el `Dockerfile` lo usa.
+4. Si el proveedor lo pide, la comprobación de salud es `GET /api/salud`.
+
+### 3. Variables de entorno del servicio
+
+```ini
+DATABASE_URL=<la que da el proveedor; en Railway, ${{Postgres.DATABASE_URL}}>
+NODE_ENV=production
+TRUST_PROXY=1
+
+JWT_SECRETO=<64+ caracteres fijos>
+ADMIN_CORREO=profesor@midominio.com
+ADMIN_CLAVE=<distinta de admin123>
+
+REGISTRO_ABIERTO=true
+REGISTRO_ROL=director
+```
+
+No hace falta `PORT` (lo inyecta el proveedor) ni `HOST` (la imagen ya escucha en `0.0.0.0`).
+Tampoco `PGADMIN_USER`: definirlo haría que el migrador intente crear un rol, que es justo lo
+que estas plataformas no permiten.
+
+Genera el secreto con:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+### 4. Comprobar
+
+```bash
+curl -s https://<tu-servicio>/api/salud
+```
+
+Debe responder `"bd": "conectada"` y `"catalogo": { "procesos": 40, "artefactos": 42 }`.
+Después, entra como administrador y cambia su contraseña (la aplicación la pide sola).
+
+> **TLS:** con una base remota la conexión se cifra sin verificar el certificado, porque estos
+> proveedores usan una CA propia; el tráfico va por su red privada. Con `PGSSL=false` se
+> desactiva y con `PGSSL=true` se fuerza.
+
+---
+
+## B · VPS propio
+
 **Arquitectura:** un VPS Linux (Ubuntu 24.04) con Node.js 20+, PostgreSQL 16 o superior solo en
 `localhost` y **Caddy** delante, que pone el HTTPS y reenvía a la app en `127.0.0.1:3000`.
 La interfaz y la API viven en el mismo origen, así que no hay que tocar CORS.
-
-> PaaS con PostgreSQL gestionado (Render, Railway, Supabase): **no recomendado** con prisa. El
-> migrador crea la base y el rol `pmbok8_app` con un superusuario (`db/migrar.js`), y esos
-> servicios no suelen darlo.
 
 ---
 
