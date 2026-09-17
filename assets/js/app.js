@@ -17,6 +17,8 @@
   var RUTAS = {
     entrar:       { vista: function () { return VistasGestor.entrar(); }, publica: true },
     clave:        { vista: function () { return VistasGestor.cambiarClave(); }, publica: true },
+    recuperar:    { vista: function () { return VistasGestor.recuperar(); }, publica: true },
+    cuenta:       { vista: function () { return VistasGestor.cuenta(); } },
     panel:      { vista: function (p) { return VistasGestor.panel(p[0] === 'nuevo'); } },
     portafolios:  { vista: function () { return VistasGestor.portafolios(); } },
     agenda:       { vista: function (p) { return VistasGestor.agenda(p[0]); } },
@@ -32,7 +34,7 @@
     principio:    { vista: function (p) { return Vistas.principio(p[0]); } }
   };
 
-  var DE_GESTOR = ['entrar', 'clave', 'panel', 'portafolios', 'agenda', 'eos', 'admin',
+  var DE_GESTOR = ['entrar', 'clave', 'recuperar', 'cuenta', 'panel', 'portafolios', 'agenda', 'eos', 'admin',
                    'aprender', 'herramientas', 'artefactos'];
 
   function leerRuta() {
@@ -49,8 +51,10 @@
     if (Gestor.clavePendiente()) {
       if (ruta.nombre !== 'clave') { location.replace('#/clave'); return; }
     } else {
-      if (!sesion && ruta.nombre !== 'entrar') { location.replace('#/entrar'); return; }
-      if (sesion && (ruta.nombre === 'entrar' || ruta.nombre === 'clave' || !ruta.nombre)) {
+      /* Sin sesión solo existen el acceso y la recuperación de la contraseña */
+      var publica = ruta.nombre === 'entrar' || ruta.nombre === 'recuperar';
+      if (!sesion && !publica) { location.replace('#/entrar'); return; }
+      if (sesion && (publica || ruta.nombre === 'clave' || !ruta.nombre)) {
         location.replace('#/panel'); return;
       }
     }
@@ -123,7 +127,8 @@
   function titulo(ruta) {
     var base = 'Gestor PMBOK® 8';
     var nombres = {
-      entrar: 'Acceso', clave: 'Cambiar contraseña', panel: 'Panel', portafolios: 'Portafolios', agenda: 'Agenda',
+      entrar: 'Acceso', clave: 'Cambiar contraseña', recuperar: 'Recuperar el acceso', cuenta: 'Mi cuenta',
+      panel: 'Panel', portafolios: 'Portafolios', agenda: 'Agenda',
       eos: 'EOS Gerencia', admin: 'Administración', aprender: 'Aprender',
       herramientas: 'Herramientas', artefactos: 'Artefactos', procesos: 'Los 40 procesos'
     };
@@ -177,6 +182,7 @@
       ['#/eos', 'EOS Gerencia', 'eos']
     ];
     if (Gestor.esAdmin()) items.push(['#/admin', 'Administración', 'admin']);
+    items.push(['#/cuenta', 'Mi cuenta', 'cuenta']);
     return '<div class="arbol-grupo"><div class="arbol-titulo">Gestión</div>' +
       items.map(function (i) { return enlace(i[0], '', i[1], i[2]); }).join('') + '</div>';
   }
@@ -307,9 +313,10 @@
     caja.hidden = false;
     caja.innerHTML =
       (servidor ? '<span class="g-sincro" id="estado-sincro" role="status" aria-live="polite"></span>' : '') +
-      '<span class="g-avatar" aria-hidden="true">' + Render.escapar(UI.iniciales(u.nombre)) + '</span>' +
-      '<span class="g-usuario-datos"><b>' + Render.escapar(u.nombre) + '</b>' +
-      '<em>' + Render.escapar(rol ? rol.nombre : u.rol) + '</em></span>' +
+      '<a class="g-usuario-enlace" href="#/cuenta" title="Mi cuenta">' +
+        '<span class="g-avatar" aria-hidden="true">' + Render.escapar(UI.iniciales(u.nombre)) + '</span>' +
+        '<span class="g-usuario-datos"><b>' + Render.escapar(u.nombre) + '</b>' +
+        '<em>' + Render.escapar(rol ? rol.nombre : u.rol) + '</em></span></a>' +
       '<button class="btn-icono" id="btn-salir" title="Cerrar sesión" aria-label="Cerrar sesión">' +
       Iconos.svg('salir') + '</button>';
     if (window.Remoto && Remoto.pendientes()) pintarSincro(Remoto.pendientes());

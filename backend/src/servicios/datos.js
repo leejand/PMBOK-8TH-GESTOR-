@@ -97,7 +97,8 @@ async function importar(datos, usuarioActual, sesionId) {
   };
 
   return db.transaccion(async (cx) => {
-    const previos = await db.varios('SELECT id, correo, clave_hash, nombre, rol, debe_cambiar_clave FROM usuarios', [], cx);
+    const previos = await db.varios(
+      'SELECT id, correo, clave_hash, nombre, rol, debe_cambiar_clave, recuperacion_hash, recuperacion_creado FROM usuarios', [], cx);
     const sesion = sesionId ? await db.uno('SELECT * FROM sesiones WHERE id = $1', [sesionId], cx) : null;
     const hashProvisional = await sesiones.hashear(CLAVE_PROVISIONAL);
     let restablecidas = 0;
@@ -118,12 +119,14 @@ async function importar(datos, usuarioActual, sesionId) {
          que ya existía (mismo id o correo), con su obligación de cambiarla,
          o se asigna la provisional, que su dueño cambiará al entrar */
       await db.consulta(
-        `INSERT INTO usuarios (id, correo, nombre, rol, activo, clave_hash, debe_cambiar_clave, creado)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, now()))`,
+        `INSERT INTO usuarios (id, correo, nombre, rol, activo, clave_hash, debe_cambiar_clave, creado,
+                               recuperacion_hash, recuperacion_creado)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, now()), $9, $10)`,
         [id, correo, requerido(u.nombre, 200) || correo, enumOr(u.rol, D.E.roles, 'miembro'),
          u.activo !== false, previo ? previo.clave_hash : hashProvisional,
          previo ? previo.debe_cambiar_clave : true,
-         ms(u.creado) ? new Date(u.creado) : null], cx);
+         ms(u.creado) ? new Date(u.creado) : null,
+         previo ? previo.recuperacion_hash : null, previo ? previo.recuperacion_creado : null], cx);
       U.add(id); correos.add(correo);
       cuenta('usuarios', true);
     }
@@ -132,8 +135,9 @@ async function importar(datos, usuarioActual, sesionId) {
     const yo = previos.find((p) => p.id === usuarioActual.id);
     if (yo && !U.has(yo.id) && !correos.has(yo.correo)) {
       await db.consulta(
-        "INSERT INTO usuarios (id, nombre, correo, clave_hash, rol, debe_cambiar_clave) VALUES ($1, $2, $3, $4, 'admin', $5)",
-        [yo.id, yo.nombre, yo.correo, yo.clave_hash, yo.debe_cambiar_clave], cx);
+        `INSERT INTO usuarios (id, nombre, correo, clave_hash, rol, debe_cambiar_clave, recuperacion_hash, recuperacion_creado)
+         VALUES ($1, $2, $3, $4, 'admin', $5, $6, $7)`,
+        [yo.id, yo.nombre, yo.correo, yo.clave_hash, yo.debe_cambiar_clave, yo.recuperacion_hash, yo.recuperacion_creado], cx);
       U.add(yo.id); correos.add(yo.correo);
       avisos.push('Tu cuenta no estaba en el archivo y se ha conservado como administrador.');
     }

@@ -154,6 +154,10 @@ window.Gestor = (function () {
     COLECCIONES.forEach(function (c) { nueva[c] = Array.isArray(s[c]) ? s[c] : []; });
     nueva.vto = s.vto || {};
     nueva.sesion = { usuarioId: s.usuario.id, desde: ahora() };
+    /* La fecha del código de recuperación solo viaja en el propio perfil */
+    nueva.usuarios.forEach(function (u) {
+      if (u.id === s.usuario.id) u.recuperacionCreado = s.usuario.recuperacionCreado || null;
+    });
     bd = nueva;
     clavePendiente = false;
     marcaConocida = s.marca || null;
@@ -580,19 +584,78 @@ window.Gestor = (function () {
     return { ok: true };
   }
 
-  /* La del propio usuario, conociendo la actual. Devuelve una promesa. */
+  /* La del propio usuario, conociendo la actual. Devuelve una promesa con
+     { ok, codigoRecuperacion } (el código solo se muestra esta vez) o { error }. */
   function cambiarPropiaClave(actual, nueva) {
     if (!nueva || nueva.length < 6) return Promise.resolve({ error: 'La contraseña debe tener al menos 6 caracteres.' });
     if (actual === nueva) return Promise.resolve({ error: 'La nueva contraseña debe ser distinta de la actual.' });
     if (enServidor()) {
+      var codigo = null;
       return Api.pedir('PUT', '/auth/clave', { actual: actual, nueva: nueva })
-        .then(function () { return hidratar(); })
-        .then(function () { return { ok: true }; }, function (err) { return { error: err.message }; });
+        .then(function (r) { codigo = r.codigoRecuperacion; return hidratar(); })
+        .then(function () { return { ok: true, codigoRecuperacion: codigo }; },
+              function (err) { return { error: err.message }; });
     }
     var u = usuarioActual();
     if (!u || u.clave !== huella(actual)) return Promise.resolve({ error: 'La contraseña actual no coincide.' });
     actualizar('usuarios', u.id, { clave: huella(nueva) });
-    return Promise.resolve({ ok: true });
+    return Promise.resolve({ ok: true, codigoRecuperacion: nuevoCodigoLocal(u.id) });
+  }
+
+  /* ── Código de recuperación ──
+     Sirve para elegir otra contraseña sin ayuda. Se guarda solo su huella,
+     vale una vez y al usarlo se entrega otro. */
+  var ALFABETO_CODIGO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+  function generarCodigo() {
+    var azar = new Uint32Array(16);
+    window.crypto.getRandomValues(azar);
+    var s = '';
+    for (var i = 0; i < 16; i++) s += ALFABETO_CODIGO[azar[i] % ALFABETO_CODIGO.length];
+    return s.match(/.{4}/g).join('-');
+  }
+
+  function normalizarCodigo(codigo) {
+    return String(codigo || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+
+  function nuevoCodigoLocal(usuarioId) {
+    var codigo = generarCodigo();
+    actualizar('usuarios', usuarioId, { recuperacion: huella(normalizarCodigo(codigo)), recuperacionCreado: ahora() });
+    return codigo;
+  }
+
+  /* Sin sesión: contraseña nueva con el código. Promesa con { ok, codigoRecuperacion } o { error }. */
+  function recuperarClave(correo, codigo, nueva) {
+    if (!nueva || nueva.length < 6) return Promise.resolve({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+    if (enServidor()) {
+      return Api.pedir('POST', '/auth/recuperar', { correo: correo, codigo: codigo, nueva: nueva })
+        .then(function (r) { return { ok: true, codigoRecuperacion: r.codigoRecuperacion }; },
+              function (err) { return { error: err.message }; });
+    }
+    var buscado = String(correo || '').trim().toLowerCase();
+    var u = lista('usuarios').filter(function (x) { return x.correo.toLowerCase() === buscado; })[0];
+    if (!u || !u.recuperacion || u.recuperacion !== huella(normalizarCodigo(codigo))) {
+      return Promise.resolve({ error: 'El correo o el código de recuperación no son correctos.' });
+    }
+    if (!u.activo) return Promise.resolve({ error: 'La cuenta está desactivada. Pide a un administrador que la reactive.' });
+    actualizar('usuarios', u.id, { clave: huella(nueva) });
+    return Promise.resolve({ ok: true, codigoRecuperacion: nuevoCodigoLocal(u.id) });
+  }
+
+  /* Otro código, confirmando la contraseña actual */
+  function regenerarCodigo(clave) {
+    var u = usuarioActual();
+    if (!u) return Promise.resolve({ error: 'No hay sesión iniciada.' });
+    if (enServidor()) {
+      return Api.pedir('POST', '/auth/codigo-recuperacion', { clave: clave })
+        .then(function (r) {
+          actualizarLocal('usuarios', u.id, { recuperacionCreado: ahora() });
+          return { ok: true, codigoRecuperacion: r.codigoRecuperacion };
+        }, function (err) { return { error: err.message }; });
+    }
+    if (u.clave !== huella(clave)) return Promise.resolve({ error: 'La contraseña actual no coincide.' });
+    return Promise.resolve({ ok: true, codigoRecuperacion: nuevoCodigoLocal(u.id) });
   }
 
   var ROLES = [
@@ -1420,6 +1483,7 @@ window.Gestor = (function () {
     c.sesion = null;
     c.usuarios = (c.usuarios || []).map(function (u) {
       delete u.clave;
+      delete u.recuperacion;
       return u;
     });
     c.formato = 'pmbok8-gestor';
@@ -1441,13 +1505,15 @@ window.Gestor = (function () {
     }
     var actuales = cargar();
     var mapa = {};
-    actuales.usuarios.forEach(function (u) { mapa[u.id] = u.clave; });
+    actuales.usuarios.forEach(function (u) { mapa[u.id] = { clave: u.clave, recuperacion: u.recuperacion }; });
 
     COLECCIONES.forEach(function (c) { actuales[c] = datos[c] || []; });
     actuales.vto = datos.vto || {};
-    // Las contraseñas no viajan en la exportación: se conservan las locales
+    // Las contraseñas y los códigos no viajan en la exportación: se conservan los locales
     actuales.usuarios.forEach(function (u) {
-      if (!u.clave) u.clave = mapa[u.id] || huella('cambiar123');
+      var previo = mapa[u.id] || {};
+      if (!u.clave) u.clave = previo.clave || huella('cambiar123');
+      if (!u.recuperacion && previo.recuperacion) u.recuperacion = previo.recuperacion;
     });
     if (!actuales.usuarios.length) sembrar();
     guardar();
@@ -1538,6 +1604,7 @@ window.Gestor = (function () {
     entrar: entrar, salir: salir, usuarioActual: usuarioActual, haySesion: haySesion,
     esAdmin: esAdmin, puedeGestionar: puedeGestionar, crearUsuario: crearUsuario,
     cambiarClave: cambiarClave, cambiarPropiaClave: cambiarPropiaClave, roles: ROLES,
+    recuperarClave: recuperarClave, regenerarCodigo: regenerarCodigo,
     mostrarCuentaInicial: mostrarCuentaInicial,
     /* permisos */
     permisosDe: permisosDe, conceder: conceder, revocar: revocar,

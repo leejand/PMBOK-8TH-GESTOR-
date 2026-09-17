@@ -20,8 +20,8 @@ const instancia = crypto.randomBytes(4).toString('hex');
 let contador = 0;
 
 const ESCRITURAS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-/* Rutas que escriben sin cambiar datos compartidos */
-const SIN_EFECTO = /^\/api\/auth\/(entrar|salir)$/;
+/* Entrar, salir y las contraseñas no cambian datos compartidos */
+const SIN_EFECTO = /^\/api\/auth\//;
 
 function marca() {
   return instancia + '.' + contador;

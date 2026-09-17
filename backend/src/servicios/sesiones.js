@@ -6,10 +6,13 @@
      vive en la tabla «sesiones», así que salir, desactivar la cuenta
      o cambiar la contraseña invalida los tokens al instante.
    · Límite de intentos fallidos por IP y correo.
+   · Código de recuperación: se entrega al elegir la propia contraseña,
+     se guarda solo su huella, sirve una vez y al usarlo se renueva.
    ═══════════════════════════════════════════════════════════ */
 
 'use strict';
 
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
@@ -76,7 +79,7 @@ async function entrar(correo, clave, { ip, agente } = {}) {
     algorithm: 'HS256', subject: fila.id, expiresIn: config.jwt.expiraHoras * 3600
   });
 
-  return { token, expira: expira.getTime(), usuario: repo.aObjeto(D.usuarios, fila) };
+  return { token, expira: expira.getTime(), usuario: perfil(fila) };
 }
 
 /* Devuelve { usuario, sesionId } o lanza 401 */
@@ -92,7 +95,15 @@ async function verificar(token) {
      WHERE s.id = $1 AND s.usuario_id = $2 AND s.revocada IS NULL AND s.expira > now() AND u.activo`,
     [datos.sid, datos.sub]);
   if (!fila) throw noAutenticado('La sesión ya no es válida. Vuelve a entrar.');
-  return { usuario: repo.aObjeto(D.usuarios, fila), sesionId: datos.sid };
+  return { usuario: perfil(fila), sesionId: datos.sid };
+}
+
+/* Lo que se devuelve de la propia cuenta: sin huellas, con la fecha del código */
+function perfil(fila) {
+  return {
+    ...repo.aObjeto(D.usuarios, fila),
+    recuperacionCreado: fila.recuperacion_creado ? fila.recuperacion_creado.getTime() : null
+  };
 }
 
 function salir(sesionId) {
@@ -106,18 +117,78 @@ function revocarDe(usuarioId, excepto, cx) {
     [usuarioId, excepto || null], cx);
 }
 
-async function cambiarPropiaClave(usuarioId, sesionId, actual, nueva) {
+async function comprobarPropiaClave(usuarioId, clave) {
   const fila = await db.uno('SELECT clave_hash FROM usuarios WHERE id = $1', [usuarioId]);
-  if (!fila || !(await bcrypt.compare(String(actual || ''), fila.clave_hash))) {
+  if (!fila || !(await bcrypt.compare(String(clave || ''), fila.clave_hash))) {
     throw new ErrorHttp(400, 'La contraseña actual no coincide.', 'CLAVE_INCORRECTA');
   }
+}
+
+/* Devuelve el código de recuperación nuevo, que solo se muestra esta vez */
+async function cambiarPropiaClave(usuarioId, sesionId, actual, nueva) {
+  await comprobarPropiaClave(usuarioId, actual);
   if (String(actual) === String(nueva)) {
     throw new ErrorHttp(400, 'La nueva contraseña debe ser distinta de la actual.', 'CLAVE_REPETIDA');
   }
-  await db.transaccion(async (cx) => {
+  return db.transaccion(async (cx) => {
     await db.consulta('UPDATE usuarios SET clave_hash = $1, debe_cambiar_clave = false WHERE id = $2',
       [await hashear(nueva), usuarioId], cx);
     await revocarDe(usuarioId, sesionId, cx);
+    return nuevoCodigo(usuarioId, cx);
+  });
+}
+
+/* ══════════════ Código de recuperación ══════════════ */
+
+/* 16 símbolos sin los que se confunden (0/O, 1/I): 80 bits de azar */
+const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function generarCodigo() {
+  let s = '';
+  for (let i = 0; i < 16; i++) s += ALFABETO[crypto.randomInt(ALFABETO.length)];
+  return s.match(/.{4}/g).join('-');
+}
+
+/* Se acepta con o sin guiones, en minúsculas o con espacios */
+function normalizarCodigo(codigo) {
+  return String(codigo || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+async function nuevoCodigo(usuarioId, cx) {
+  const codigo = generarCodigo();
+  await db.consulta('UPDATE usuarios SET recuperacion_hash = $2, recuperacion_creado = now() WHERE id = $1',
+    [usuarioId, await hashear(normalizarCodigo(codigo))], cx);
+  return codigo;
+}
+
+/* Con la contraseña actual se puede pedir otro código (el anterior deja de valer) */
+async function regenerarCodigo(usuarioId, clave) {
+  await comprobarPropiaClave(usuarioId, clave);
+  return nuevoCodigo(usuarioId);
+}
+
+/* Elegir una contraseña nueva con el código. Mismo límite de intentos que
+   la entrada y el mismo mensaje tanto si el correo existe como si no. */
+async function recuperar(correo, codigo, nueva, { ip } = {}) {
+  const correoNorm = String(correo || '').trim().toLowerCase();
+  const k = 'recuperar|' + claveIntento(ip, correoNorm);
+  comprobarLimite(k);
+
+  const fila = await db.uno('SELECT * FROM usuarios WHERE correo = $1', [correoNorm]);
+  const valido = await bcrypt.compare(normalizarCodigo(codigo), (fila && fila.recuperacion_hash) || HASH_RELLENO);
+  if (!fila || !fila.recuperacion_hash || !valido) {
+    anotarFallo(k);
+    throw new ErrorHttp(401, 'El correo o el código de recuperación no son correctos.', 'RECUPERACION_INVALIDA');
+  }
+  if (!fila.activo) {
+    throw new ErrorHttp(403, 'La cuenta está desactivada. Pide a un administrador que la reactive.', 'CUENTA_DESACTIVADA');
+  }
+  intentos.delete(k);
+  return db.transaccion(async (cx) => {
+    await db.consulta('UPDATE usuarios SET clave_hash = $1, debe_cambiar_clave = false WHERE id = $2',
+      [await hashear(nueva), fila.id], cx);
+    await revocarDe(fila.id, null, cx);
+    return nuevoCodigo(fila.id, cx);
   });
 }
 
@@ -132,4 +203,7 @@ function reiniciarLimites() {
   intentos.clear();
 }
 
-module.exports = { entrar, verificar, salir, revocarDe, cambiarPropiaClave, hashear, purgar, reiniciarLimites };
+module.exports = {
+  entrar, verificar, salir, revocarDe, cambiarPropiaClave, hashear, purgar, reiniciarLimites,
+  regenerarCodigo, recuperar, normalizarCodigo
+};

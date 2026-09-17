@@ -56,9 +56,10 @@ window.VistasGestor = (function () {
           '<h2>Iniciar sesión</h2>' +
           '<p class="g-acceso-bajada">Entra a tu espacio de gestión de proyectos.</p>' +
           '<div id="g-error-acceso"></div>' +
-          UI.texto('acc-correo', 'Correo electrónico', '', { tipo: 'email', placeholder: 'tu@organizacion.com' }) +
+          UI.texto('acc-correo', 'Correo electrónico', VistasGestor.correoRecordado || '', { tipo: 'email', placeholder: 'tu@organizacion.com' }) +
           UI.texto('acc-clave', 'Contraseña', '', { tipo: 'password', placeholder: '••••••••' }) +
           '<button class="btn primario g-ancho" data-g="entrar">Entrar ' + Iconos.svg('flecha-der', 'ic-flecha') + '</button>' +
+          '<p class="g-olvido"><a class="pa-mini" href="#/recuperar">¿Olvidaste tu contraseña?</a></p>' +
           (cuentaInicial
             ? '<div class="nota"><div class="nota-titulo">Cuenta inicial</div>' +
               '<code>admin@pmbok.local</code> · <code>admin123</code><br>' +
@@ -99,6 +100,123 @@ window.VistasGestor = (function () {
         '</div>' +
       '</section>' +
       '</div>';
+  }
+
+  /* Sin sesión: contraseña nueva con el código de recuperación */
+  function recuperar() {
+    return '<div class="g-acceso g-acceso-solo">' +
+      '<section class="g-acceso-formulario">' +
+        '<div class="g-acceso-tarjeta">' +
+          '<div class="g-acceso-marca"><span class="marca-glifo" aria-hidden="true">◆</span>' +
+            '<span>Gestor PMBOK<sup>®</sup> 8</span></div>' +
+          '<h2>Recuperar el acceso</h2>' +
+          '<p class="g-acceso-bajada">Escribe tu correo, el código de recuperación que guardaste al elegir tu ' +
+            'contraseña y la contraseña nueva. El código sirve una vez: al usarlo recibirás otro.</p>' +
+          '<div id="g-error-recuperar"></div>' +
+          UI.texto('rc-correo', 'Correo electrónico', VistasGestor.correoRecordado || '', { tipo: 'email', placeholder: 'tu@organizacion.com' }) +
+          UI.texto('rc-codigo', 'Código de recuperación', '', { placeholder: 'XXXX-XXXX-XXXX-XXXX' }) +
+          UI.texto('rc-nueva', 'Nueva contraseña', '', { tipo: 'password', placeholder: 'mínimo 6 caracteres' }) +
+          UI.texto('rc-repetir', 'Repite la nueva contraseña', '', { tipo: 'password', placeholder: '••••••••' }) +
+          '<button class="btn primario g-ancho" data-g="recuperar">Cambiar la contraseña ' +
+            Iconos.svg('flecha-der', 'ic-flecha') + '</button>' +
+          '<div class="nota"><div class="nota-titulo">¿No tienes el código?</div>' +
+            'Pide a un administrador que restablezca tu contraseña desde Administración; al entrar elegirás una ' +
+            'propia y recibirás tu código.</div>' +
+          '<div class="tarjeta-pie"><a class="btn" href="#/entrar">Volver a iniciar sesión</a></div>' +
+        '</div>' +
+      '</section>' +
+      '</div>';
+  }
+
+  /* ══════════════ MI CUENTA ══════════════ */
+
+  function cuenta() {
+    var u = Gestor.usuarioActual();
+    if (!u) return '';
+    var rol = Gestor.roles.filter(function (r) { return r.id === u.rol; })[0] || { nombre: u.rol, descripcion: '' };
+    var tieneCodigo = Gestor.enServidor() ? !!u.recuperacionCreado : !!u.recuperacion;
+
+    return '<div class="hoja prosa">' +
+      '<div class="eyebrow">Tu cuenta</div>' +
+      '<h1 class="titulo-pagina">Mi cuenta</h1>' +
+      '<div class="g-cuenta">' + UI.avatar(u.nombre, 'grande') +
+        '<div><b>' + R.escapar(u.nombre) + '</b><span>' + R.escapar(u.correo) + '</span>' +
+        '<span>' + R.escapar(rol.nombre) + ' · ' + R.escapar(rol.descripcion) + '</span></div></div>' +
+
+      '<h2>Cambiar la contraseña</h2>' +
+      '<div class="pa-panel">' +
+        '<div id="g-error-cuenta"></div>' +
+        UI.texto('mc-actual', 'Contraseña actual', '', { tipo: 'password' }) +
+        UI.fila([
+          UI.texto('mc-nueva', 'Nueva contraseña', '', { tipo: 'password', placeholder: 'mínimo 6 caracteres' }),
+          UI.texto('mc-repetir', 'Repítela', '', { tipo: 'password' })
+        ]) +
+        '<div class="tarjeta-pie"><button class="btn primario" data-g="cuenta-clave">Cambiar la contraseña</button>' +
+        '<span class="pa-aviso-inline">Se cierran tus demás sesiones y recibes un código de recuperación nuevo.</span></div>' +
+      '</div>' +
+
+      '<h2>Código de recuperación</h2>' +
+      '<p>Con él puedes elegir otra contraseña si olvidas la tuya, desde «¿Olvidaste tu contraseña?» en la pantalla de acceso. ' +
+        'Guárdalo fuera de este equipo: en tu gestor de contraseñas o en papel.</p>' +
+      '<div class="nota' + (tieneCodigo ? '' : ' aviso') + '"><div class="nota-titulo">' +
+        (tieneCodigo ? 'Tienes un código vigente' : 'Aún no tienes código') + '</div>' +
+        (tieneCodigo
+          ? (u.recuperacionCreado ? 'Se generó el ' + UI.fecha(u.recuperacionCreado, true) + '. ' : '') +
+            'Si lo perdiste, genera otro: el anterior dejará de servir.'
+          : 'Genera uno ahora para no depender de un administrador si olvidas tu contraseña.') + '</div>' +
+      '<div class="tarjeta-pie"><button class="btn" data-g="cuenta-codigo">' + Iconos.svg('llave') +
+        (tieneCodigo ? ' Generar un código nuevo' : ' Generar mi código') + '</button></div>' +
+      '</div>';
+  }
+
+  /* El código solo se muestra una vez: se ofrece copiarlo o descargarlo */
+  function mostrarCodigo(codigo, opc) {
+    if (!codigo) return;
+    opc = opc || {};
+    var u = Gestor.usuarioActual();
+    var correo = opc.correo || (u && u.correo) || '';
+    Dialogo.mostrar({
+      eyebrow: 'Código de recuperación',
+      titulo: opc.titulo || 'Guarda tu código de recuperación',
+      texto: opc.texto || 'Te permitirá elegir otra contraseña si olvidas la tuya. Solo se muestra ahora.',
+      html: '<div class="g-codigo" id="g-codigo-recuperacion">' + R.escapar(codigo) + '</div>' +
+        '<p class="g-codigo-nota">Guárdalo fuera de este equipo. Sirve una vez: al usarlo recibirás otro.</p>' +
+        '<div class="tarjeta-pie">' +
+          '<button class="btn" data-cod="copiar">Copiar</button>' +
+          '<button class="btn" data-cod="descargar">Descargar (.txt)</button>' +
+        '</div>',
+      cerrar: 'Ya lo guardé'
+    }, function (capa) {
+      capa.querySelector('[data-cod="copiar"]').addEventListener('click', function () {
+        copiarTexto(codigo).then(function () { Dialogo.avisar('Código copiado'); },
+          function () { Dialogo.avisar('No se pudo copiar: selecciónalo y cópialo a mano', 'aviso'); });
+      });
+      capa.querySelector('[data-cod="descargar"]').addEventListener('click', function () {
+        descargar('codigo-recuperacion-pmbok8.txt', [
+          'Gestor PMBOK 8 · Código de recuperación',
+          'Cuenta: ' + correo,
+          'Generado: ' + new Date().toLocaleString('es'),
+          '',
+          codigo,
+          '',
+          'Úsalo en «¿Olvidaste tu contraseña?». Sirve una vez; al usarlo recibirás otro.'
+        ].join('\n'), 'text/plain');
+      });
+    });
+  }
+
+  function copiarTexto(texto) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(texto);
+    return new Promise(function (resolver, rechazar) {
+      var area = document.createElement('textarea');
+      area.value = texto;
+      document.body.appendChild(area);
+      area.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(area);
+      if (ok) resolver(); else rechazar();
+    });
   }
 
   /* ══════════════ PANEL ══════════════ */
@@ -880,13 +998,23 @@ window.VistasGestor = (function () {
       var clave = document.getElementById('acc-clave');
       if (clave) clave.addEventListener('keydown', function (e) { if (e.key === 'Enter') accionEntrar(); });
       var correo = document.getElementById('acc-correo');
-      if (correo) correo.focus();
+      if (correo && !Dialogo.abierto()) (correo.value ? clave : correo).focus();
     }
     if (vista === 'clave') {
       var repetir = document.getElementById('cc-repetir');
       if (repetir) repetir.addEventListener('keydown', function (e) { if (e.key === 'Enter') accionCambiarClave(); });
       var actual = document.getElementById('cc-actual');
       if (actual) actual.focus();
+    }
+    if (vista === 'recuperar') {
+      var rcRepetir = document.getElementById('rc-repetir');
+      if (rcRepetir) rcRepetir.addEventListener('keydown', function (e) { if (e.key === 'Enter') accionRecuperar(); });
+      var rcPrimero = document.getElementById(VistasGestor.correoRecordado ? 'rc-codigo' : 'rc-correo');
+      if (rcPrimero) rcPrimero.focus();
+    }
+    if (vista === 'cuenta') {
+      var mcRepetir = document.getElementById('mc-repetir');
+      if (mcRepetir) mcRepetir.addEventListener('keydown', function (e) { if (e.key === 'Enter') accionCuentaClave(); });
     }
 
     conectarSelectores();
@@ -1012,7 +1140,59 @@ window.VistasGestor = (function () {
       if (r.error) { error('g-error-clave', r.error); return; }
       location.hash = '#/panel';
       recargar();
-      Dialogo.avisar('Contraseña actualizada');
+      mostrarCodigo(r.codigoRecuperacion, {
+        titulo: 'Contraseña guardada',
+        texto: 'Antes de seguir, guarda tu código de recuperación: te permitirá elegir otra contraseña si olvidas esta. Solo se muestra ahora.'
+      });
+    });
+  }
+
+  function accionRecuperar() {
+    var correo = UI.valorDe('rc-correo').trim();
+    var nueva = UI.valorDe('rc-nueva');
+    if (!correo || !UI.valorDe('rc-codigo').trim()) { error('g-error-recuperar', 'Escribe tu correo y tu código de recuperación.'); return; }
+    if (nueva !== UI.valorDe('rc-repetir')) { error('g-error-recuperar', 'Las dos contraseñas nuevas no coinciden.'); return; }
+    ocupado('[data-g="recuperar"]', true);
+    Gestor.recuperarClave(correo, UI.valorDe('rc-codigo'), nueva).then(function (r) {
+      ocupado('[data-g="recuperar"]', false);
+      if (r.error) { error('g-error-recuperar', r.error); return; }
+      VistasGestor.correoRecordado = correo;
+      location.hash = '#/entrar';
+      mostrarCodigo(r.codigoRecuperacion, {
+        correo: correo,
+        titulo: 'Contraseña cambiada',
+        texto: 'Ya puedes entrar con tu nueva contraseña. Este es tu código de recuperación nuevo: el anterior ya no sirve.'
+      });
+    });
+  }
+
+  function accionCuentaClave() {
+    var nueva = UI.valorDe('mc-nueva');
+    if (nueva !== UI.valorDe('mc-repetir')) { error('g-error-cuenta', 'Las dos contraseñas nuevas no coinciden.'); return; }
+    ocupado('[data-g="cuenta-clave"]', true);
+    Gestor.cambiarPropiaClave(UI.valorDe('mc-actual'), nueva).then(function (r) {
+      ocupado('[data-g="cuenta-clave"]', false);
+      if (r.error) { error('g-error-cuenta', r.error); return; }
+      recargar();
+      mostrarCodigo(r.codigoRecuperacion, {
+        titulo: 'Contraseña cambiada',
+        texto: 'Tus demás sesiones se han cerrado. Este es tu código de recuperación nuevo: el anterior ya no sirve.'
+      });
+    });
+  }
+
+  function accionCuentaCodigo() {
+    Dialogo.pedir({
+      titulo: 'Generar un código de recuperación',
+      texto: 'Confirma tu contraseña. Si ya tenías un código, dejará de servir.',
+      campos: [{ id: 'clave', etiqueta: 'Contraseña actual', tipo: 'password' }],
+      confirmar: 'Generar código'
+    }, function (v) {
+      Gestor.regenerarCodigo(v.clave).then(function (r) {
+        if (r.error) { Dialogo.avisar(r.error, 'error'); return; }
+        recargar();
+        mostrarCodigo(r.codigoRecuperacion);
+      });
     });
   }
 
@@ -1064,6 +1244,9 @@ window.VistasGestor = (function () {
     switch (accion) {
       case 'entrar': accionEntrar(); break;
       case 'cambiar-clave': accionCambiarClave(); break;
+      case 'recuperar': accionRecuperar(); break;
+      case 'cuenta-clave': accionCuentaClave(); break;
+      case 'cuenta-codigo': accionCuentaCodigo(); break;
       case 'llevar-al-servidor': accionLlevarAlServidor(); break;
 
       case 'acceso-demo':
@@ -1340,9 +1523,9 @@ window.VistasGestor = (function () {
     }
   }
 
-  function descargar(nombre, contenido) {
+  function descargar(nombre, contenido, tipo) {
     try {
-      var blob = new Blob([contenido], { type: 'application/json;charset=utf-8' });
+      var blob = new Blob([contenido], { type: (tipo || 'application/json') + ';charset=utf-8' });
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url; a.download = nombre;
@@ -1377,7 +1560,9 @@ window.VistasGestor = (function () {
   }
 
   return {
-    entrar: entrar, cambiarClave: cambiarClave, panel: panel, portafolios: portafolios, agenda: agenda,
+    entrar: entrar, cambiarClave: cambiarClave, recuperar: recuperar, cuenta: cuenta,
+    mostrarCodigo: mostrarCodigo, correoRecordado: null,
+    panel: panel, portafolios: portafolios, agenda: agenda,
     eos: eos, admin: admin, aprender: aprender,
     herramientas: herramientas, artefactos: artefactos,
     calendario: calendario, tarjetaProyecto: tarjetaProyecto,
