@@ -2925,3 +2925,19 @@ html[data-tema="oscuro"] .d-aviso { background: rgb(40 40 47 / .94); border-colo
 .g-tarea:not([draggable]) { cursor: default; }
 .g-intro-tareas { font-size: 13.4px; color: var(--tinta-2); margin: 0 0 14px; }
 .g-nota-ejecutor { margin-top: 14px; }
+
+/* ── Historial de versiones de un documento ── */
+.g-historial { margin: 0 0 18px; }
+.g-versiones, .prosa .g-versiones { list-style: none; margin: 10px 0 2px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.g-versiones li, .prosa .g-versiones li {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0;
+  padding: 8px 12px; border: 1px solid var(--linea); border-radius: var(--radio); background: var(--papel);
+}
+.g-versiones b { font-family: var(--mono); font-size: 12.5px; }
+.g-versiones .g-doc-estado { font-size: 11px; }
+.g-version-meta { font-size: 12px; color: var(--tinta-3); }
+.g-versiones .pa-mini { margin-left: auto; }
+.g-bloque-lectura { font-size: 13.6px; }
+.g-bloque-lectura > :last-child { margin-bottom: 0; }
+.g-sin-dato, .prosa .g-sin-dato { color: var(--tinta-3); font-style: italic; margin: 0; }
+.pa-campo.g-cambiado { border-color: color-mix(in srgb, var(--ambar) 40%, var(--linea)); }

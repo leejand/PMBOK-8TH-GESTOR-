@@ -99,10 +99,63 @@ async function cambiarEstado(documentoId, estado) {
   return enriquecer(await repo.obtener(D.documentos, documentoId), false);
 }
 
-async function nuevaVersion(documentoId) {
-  const fila = await db.uno(
-    "UPDATE documentos SET version = version + 1, estado = 'borrador' WHERE id = $1 RETURNING id", [documentoId]);
-  if (!fila) throw noEncontrado('No existe el documento.');
+/* Cierra la versión actual guardando su copia y abre la siguiente como
+   borrador. La fecha de la última aprobación se conserva en el documento.
+   idCopia: identificador que la interfaz dio a la copia (opcional). */
+async function nuevaVersion(documentoId, autorId, idCopia) {
+  return db.transaccion(async (cx) => {
+    const doc = await db.uno('SELECT * FROM documentos WHERE id = $1 FOR UPDATE', [documentoId], cx);
+    if (!doc) throw noEncontrado('No existe el documento.');
+    const copia = await repo.insertar(D.versiones, {
+      id: idCopia, proyectoId: doc.proyecto_id, documentoId, version: doc.version, nombre: doc.nombre,
+      estado: doc.estado, contenido: doc.contenido || {}, aprobado: doc.aprobado ? doc.aprobado.getTime() : null,
+      autorId: autorId || null
+    }, cx);
+    await db.consulta("UPDATE documentos SET version = version + 1, estado = 'borrador' WHERE id = $1", [documentoId], cx);
+    const documento = enriquecer(await repo.obtener(D.documentos, documentoId, cx), false);
+    return { ...documento, versionGuardada: conCompletitud(copia, doc.artefacto_id) };
+  });
+}
+
+/* Una copia no guarda su artefacto: es el de su documento */
+function conCompletitud(v, artefactoId) {
+  return { ...v, completitud: completitud({ artefactoId, contenido: v.contenido }) };
+}
+
+async function artefactoDe(documentoId) {
+  const d = await db.uno('SELECT artefacto_id FROM documentos WHERE id = $1', [documentoId]);
+  if (!d) throw noEncontrado('No existe el documento.');
+  return d.artefacto_id;
+}
+
+/* Historial sin el contenido: número, estado, fechas y completitud */
+async function versiones(documentoId) {
+  const artefactoId = await artefactoDe(documentoId);
+  const lista = await repo.listar(D.versiones, { documento_id: documentoId });
+  return lista.map((v) => {
+    const r = conCompletitud(v, artefactoId);
+    delete r.contenido;
+    return r;
+  });
+}
+
+async function version(documentoId, numero) {
+  const artefactoId = await artefactoDe(documentoId);
+  const n = Number(numero);
+  const fila = Number.isInteger(n)
+    ? await db.uno('SELECT id FROM documento_versiones WHERE documento_id = $1 AND version = $2', [documentoId, n])
+    : null;
+  if (!fila) throw noEncontrado('El documento no tiene guardada la versión ' + numero + '.');
+  const v = conCompletitud(await repo.obtener(D.versiones, fila.id), artefactoId);
+  const art = artefacto(artefactoId);
+  return { ...v, artefactoId, plantilla: art ? art.plantilla : [] };
+}
+
+/* Devuelve al documento el contenido de una versión guardada, como borrador */
+async function restaurarVersion(documentoId, numero) {
+  const v = await version(documentoId, numero);
+  await db.consulta("UPDATE documentos SET contenido = $2::jsonb, estado = 'borrador' WHERE id = $1",
+    [documentoId, JSON.stringify(v.contenido || {})]);
   return enriquecer(await repo.obtener(D.documentos, documentoId), false);
 }
 
@@ -130,5 +183,6 @@ async function artefactosDeProceso(proyectoId, procesoId, tipo) {
 }
 
 module.exports = {
-  artefacto, completitud, enriquecer, listar, generar, guardarBloque, cambiarEstado, nuevaVersion, artefactosDeProceso
+  artefacto, completitud, enriquecer, listar, generar, guardarBloque, cambiarEstado,
+  nuevaVersion, versiones, version, restaurarVersion, artefactosDeProceso
 };

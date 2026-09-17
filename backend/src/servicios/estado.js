@@ -21,7 +21,7 @@ const alcance = require('./alcance');
 
 const DE_PROYECTO = [
   ['miembros', D.miembros], ['procesos', D.procesosProyecto], ['documentos', D.documentos],
-  ['archivos', D.archivos], ['riesgos', D.riesgos], ['interesados', D.interesados],
+  ['versiones', D.versiones], ['archivos', D.archivos], ['riesgos', D.riesgos], ['interesados', D.interesados],
   ['cambios', D.cambios], ['lecciones', D.lecciones], ['tareas', D.tareas],
   ['sprints', D.sprints], ['mediciones', D.mediciones], ['comentarios', D.comentarios]
 ];

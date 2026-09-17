@@ -29,7 +29,7 @@ window.Gestor = (function () {
 
   var COLECCIONES = [
     'usuarios', 'permisos', 'portafolios', 'programas', 'proyectos', 'miembros',
-    'procesos', 'documentos', 'archivos', 'riesgos', 'interesados', 'cambios',
+    'procesos', 'documentos', 'versiones', 'archivos', 'riesgos', 'interesados', 'cambios',
     'lecciones', 'tareas', 'sprints', 'mediciones', 'comentarios',
     'rocas', 'metricas', 'asientos'
   ];
@@ -115,7 +115,7 @@ window.Gestor = (function () {
   var RUTA_ITEM = RUTA_PROYECTO.concat(RUTA_GLOBAL,
     ['programas', 'documentos', 'archivos', 'usuarios', 'permisos', 'proyectos']);
   /* Campos calculados que la API añade a sus respuestas y no se guardan */
-  var CALCULADOS = ['severidad', 'sprintCerrado', 'progreso', 'siguiente', 'completitud', 'plantilla'];
+  var CALCULADOS = ['severidad', 'sprintCerrado', 'progreso', 'siguiente', 'completitud', 'plantilla', 'versionGuardada'];
 
   function iniciar() {
     if (!window.Api) return Promise.resolve('local');
@@ -312,6 +312,11 @@ window.Gestor = (function () {
   function borrar(coleccion, id) {
     var previo = uno(coleccion, id);
     var hecho = borrarLocal(coleccion, id);
+    /* El historial se va con su documento (en el servidor, en cascada) */
+    if (hecho && coleccion === 'documentos') {
+      cargar().versiones = cargar().versiones.filter(function (v) { return v.documentoId !== id; });
+      guardar();
+    }
     if (hecho && enServidor()) remotoBorrar(coleccion, id, etiqueta(previo));
     return hecho;
   }
@@ -628,7 +633,7 @@ window.Gestor = (function () {
 
   function proyecto(id) { return uno('proyectos', id); }
 
-  var HIJAS_PROYECTO = ['procesos', 'documentos', 'archivos', 'riesgos', 'interesados', 'cambios', 'lecciones',
+  var HIJAS_PROYECTO = ['procesos', 'documentos', 'versiones', 'archivos', 'riesgos', 'interesados', 'cambios', 'lecciones',
     'tareas', 'sprints', 'mediciones', 'comentarios', 'miembros'];
 
   function borrarProyecto(id) {
@@ -847,17 +852,49 @@ window.Gestor = (function () {
     return r;
   }
 
+  /* Cierra la versión actual guardando su copia y abre la siguiente como borrador */
   function nuevaVersion(documentoId) {
     var d = uno('documentos', documentoId);
     if (!d) return null;
+    var guardada = crearLocal('versiones', {
+      proyectoId: d.proyectoId, documentoId: d.id, version: d.version || 1, nombre: d.nombre,
+      estado: d.estado, contenido: copia(d.contenido || {}), aprobado: d.aprobado || null,
+      autorId: (usuarioActual() || {}).id || null
+    });
     var r = actualizarLocal('documentos', documentoId, { version: (d.version || 1) + 1, estado: 'borrador' });
     if (enServidor()) {
       Remoto.enviar({
-        metodo: 'POST', ruta: '/documentos/' + Api.c(documentoId) + '/versiones',
-        descripcion: d.nombre, despues: adoptar('documentos', documentoId)
+        metodo: 'POST', ruta: '/documentos/' + Api.c(documentoId) + '/versiones', cuerpo: { id: guardada.id },
+        descripcion: d.nombre,
+        despues: function (respuesta) {
+          if (respuesta && respuesta.versionGuardada) adoptar('versiones', guardada.id)(respuesta.versionGuardada);
+          adoptar('documentos', documentoId)(respuesta);
+        }
       });
     }
     return r;
+  }
+
+  function versionesDe(documentoId) {
+    return lista('versiones', { documentoId: documentoId }).sort(function (a, b) { return a.version - b.version; });
+  }
+
+  function versionDe(documentoId, numero) {
+    return versionesDe(documentoId).filter(function (v) { return v.version === Number(numero); })[0] || null;
+  }
+
+  /* El contenido de una versión guardada vuelve al documento, como borrador */
+  function restaurarVersion(documentoId, numero) {
+    var v = versionDe(documentoId, numero);
+    if (!v) return { error: 'Esa versión no está guardada.' };
+    var d = actualizarLocal('documentos', documentoId, { contenido: copia(v.contenido || {}), estado: 'borrador' });
+    if (enServidor()) {
+      Remoto.enviar({
+        metodo: 'POST', ruta: '/documentos/' + Api.c(documentoId) + '/versiones/' + v.version + '/restaurar',
+        descripcion: d.nombre, despues: adoptar('documentos', documentoId)
+      });
+    }
+    return { documento: d };
   }
 
   /* Cuántos bloques de la plantilla están rellenados */
@@ -1346,6 +1383,7 @@ window.Gestor = (function () {
     artefacto: artefacto, documentosDe: documentosDe, documentoDe: documentoDe,
     generarDocumento: generarDocumento, guardarBloque: guardarBloque,
     cambiarEstadoDocumento: cambiarEstadoDocumento, nuevaVersion: nuevaVersion,
+    versionesDe: versionesDe, versionDe: versionDe, restaurarVersion: restaurarVersion,
     completitudDocumento: completitudDocumento,
     disponibilidadEntradas: disponibilidadEntradas, salidasDe: salidasDe,
     /* control */

@@ -409,7 +409,7 @@ window.VistasObra = (function () {
       ? '<div class="g-documentos">' + docs.map(function (d) {
           var comp = Gestor.completitudDocumento(d);
           var proc = d.procesoId ? PMBOK.procesos.filter(function (x) { return x.id === d.procesoId; })[0] : null;
-          return '<a class="g-documento item-doc" data-categoria="' + d.categoria + '" ' +
+          return '<a class="g-documento item-doc" data-categoria="' + R.escapar(d.categoria) + '" ' +
             'href="#/proyectos/' + p.id + '/documento/' + d.id + '">' +
             '<div class="g-doc-estado ' + d.estado + '">' + etiquetaDoc(d.estado) + '</div>' +
             '<div class="g-doc-cuerpo">' +
@@ -435,9 +435,12 @@ window.VistasObra = (function () {
 
   /* ══════════════ 4 · EDITOR DE DOCUMENTO ══════════════ */
 
-  function editorDocumento(p, docId) {
+  function editorDocumento(p, ruta) {
+    var partes = String(ruta || '').split('/');
+    var docId = partes[0];
     var d = Gestor.uno('documentos', docId);
     if (!d || d.proyectoId !== p.id) return Vistas.noEncontrado();
+    if (partes[1] === 'version') return vistaVersion(p, d, partes[2]);
     var art = Gestor.artefacto(d.artefactoId);
     if (!art) return Vistas.noEncontrado();
 
@@ -506,6 +509,8 @@ window.VistasObra = (function () {
         (puede ? '<button class="btn" data-o="doc-borrar">Eliminar</button>' : '') +
       '</div>' +
 
+      historialDocumento(p, d) +
+
       '<input type="hidden" id="g-doc-id" value="' + d.id + '">' +
       '<div class="pa-campos">' + bloques + '</div>' +
 
@@ -523,6 +528,106 @@ window.VistasObra = (function () {
       '</div>';
   }
 
+  /* ── Historial de versiones ─────────────────────────────── */
+
+  function historialDocumento(p, d) {
+    var versiones = Gestor.versionesDe(d.id);
+    if (!versiones.length) return '';
+    return '<details class="g-adaptacion g-historial">' +
+      '<summary><span>Historial</span> ' + versiones.length +
+        (versiones.length === 1 ? ' versión guardada' : ' versiones guardadas') + '</summary>' +
+      '<ol class="g-versiones">' + versiones.slice().reverse().map(function (v) {
+        var autor = v.autorId ? Gestor.uno('usuarios', v.autorId) : null;
+        return '<li>' +
+          '<b>v' + v.version + '</b>' +
+          '<span class="g-doc-estado ' + v.estado + '">' + etiquetaDoc(v.estado) + '</span>' +
+          '<span class="g-version-meta">cerrada ' + UI.fecha(v.creado, true) +
+            (autor ? ' por ' + R.escapar(autor.nombre) : '') +
+            ' · ' + Gestor.completitudDocumento({ artefactoId: d.artefactoId, contenido: v.contenido }) + ' % completa</span>' +
+          '<a class="pa-mini" href="#/proyectos/' + p.id + '/documento/' + d.id + '/version/' + v.version + '">Ver</a>' +
+          '</li>';
+      }).join('') + '</ol></details>';
+  }
+
+  /* Texto de un bloque para leerlo (sin editar) */
+  function valorLegible(b, v) {
+    if (b.t === 'tabla') {
+      var filas = Array.isArray(v) ? v.filter(function (f) {
+        return Array.isArray(f) && f.some(function (c) { return String(c || '').trim(); });
+      }) : [];
+      if (!filas.length) return '<p class="g-sin-dato">Sin datos.</p>';
+      return R.tabla(b.col.map(R.escapar), filas.map(function (f) {
+        return b.col.map(function (_, j) { return R.escapar(f[j] == null ? '' : f[j]); });
+      }));
+    }
+    var texto = Array.isArray(v) ? v.join('\n') : String(v == null ? '' : v);
+    if (!texto.trim()) return '<p class="g-sin-dato">Sin redactar.</p>';
+    if (b.t === 'lista') {
+      return '<ul>' + texto.split('\n').filter(function (x) { return x.trim(); }).map(function (x) {
+        return '<li>' + R.escapar(x.trim()) + '</li>';
+      }).join('') + '</ul>';
+    }
+    return '<p>' + R.escapar(texto).replace(/\n/g, '<br>') + '</p>';
+  }
+
+  function mismoValor(a, b) {
+    var vacio = function (x) {
+      return x === undefined || x === null || x === '' ||
+        (Array.isArray(x) && !x.some(function (f) { return Array.isArray(f) ? f.some(function (c) { return String(c || '').trim(); }) : String(f || '').trim(); }));
+    };
+    if (vacio(a) && vacio(b)) return true;
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+
+  function vistaVersion(p, d, numero) {
+    var v = Gestor.versionDe(d.id, numero);
+    var art = Gestor.artefacto(d.artefactoId);
+    if (!v || !art) return Vistas.noEncontrado();
+    var puede = Gestor.puede(p.id, 'editar');
+    var autor = v.autorId ? Gestor.uno('usuarios', v.autorId) : null;
+    var cambios = 0;
+
+    var bloques = art.plantilla.map(function (b, i) {
+      var antes = (v.contenido || {})[i];
+      var igual = mismoValor(antes, (d.contenido || {})[i]);
+      if (!igual) cambios++;
+      return '<div class="pa-campo' + (igual ? '' : ' g-cambiado') + '">' +
+        '<div class="pa-campo-cab"><h3>' + R.escapar(b.et) + '</h3>' +
+        (igual ? '' : '<span class="pa-pastilla aviso">Cambió después</span>') + '</div>' +
+        '<div class="g-bloque-lectura">' + valorLegible(b, antes) + '</div></div>';
+    }).join('');
+
+    return '<div class="hoja-ancha prosa">' +
+      R.migas([{ texto: 'Panel', ruta: '#/panel' },
+               { texto: p.nombre, ruta: '#/proyectos/' + p.id },
+               { texto: 'Documentos', ruta: '#/proyectos/' + p.id + '/documentos' },
+               { texto: d.nombre, ruta: '#/proyectos/' + p.id + '/documento/' + d.id },
+               { texto: 'Versión ' + v.version }]) +
+      '<div class="g-doc-cab-editor">' +
+        '<div>' +
+          '<div class="eyebrow">' + R.escapar(art.categoria) + ' · copia guardada de la v' + v.version + '</div>' +
+          '<h1 class="titulo-pagina">' + R.escapar(v.nombre) + '</h1>' +
+          '<p class="bajada">Cerrada el ' + UI.fecha(v.creado, true) + (autor ? ' por ' + R.escapar(autor.nombre) : '') +
+            (v.aprobado ? ' · aprobada el ' + UI.fecha(v.aprobado) : '') + '.</p>' +
+        '</div>' +
+        '<div class="g-doc-estado-grande ' + v.estado + '">' + etiquetaDoc(v.estado) + '</div>' +
+      '</div>' +
+      '<div class="nota"><div class="nota-titulo">Solo lectura</div>' +
+        'La versión vigente es la v' + (d.version || 1) + '. ' +
+        (cambios
+          ? cambios + (cambios === 1 ? ' bloque cambió' : ' bloques cambiaron') + ' desde esta copia; aparecen marcados.'
+          : 'Su contenido coincide con el actual.') + '</div>' +
+      '<div class="g-doc-barra">' +
+        '<input type="hidden" id="g-version-doc" value="' + d.id + '">' +
+        '<input type="hidden" id="g-version-n" value="' + v.version + '">' +
+        (puede ? '<button class="btn primario" data-o="version-restaurar">Restaurar esta versión</button>' : '') +
+        '<button class="btn" data-o="version-exportar">Descargar (.md)</button>' +
+        '<a class="btn" href="#/proyectos/' + p.id + '/documento/' + d.id + '">Volver al documento</a>' +
+      '</div>' +
+      '<div class="pa-campos">' + bloques + '</div>' +
+      '</div>';
+  }
+
   /* ══════════════ 5 · ARCHIVOS ══════════════ */
 
   function tabArchivos(p) {
@@ -532,11 +637,11 @@ window.VistasObra = (function () {
     var lista = archivos.length
       ? '<div class="g-archivos">' + archivos.map(function (a) {
           var autor = a.autorId ? Gestor.uno('usuarios', a.autorId) : null;
-          return '<div class="g-archivo item-archivo" data-categoria="' + a.categoria + '">' +
+          return '<div class="g-archivo item-archivo" data-categoria="' + R.escapar(a.categoria) + '">' +
             '<div class="g-archivo-icono">' + Archivos.icono(a.tipo, a.nombre) + '</div>' +
             '<div class="g-archivo-cuerpo">' +
               '<div class="g-archivo-nombre">' + R.escapar(a.nombre) + '</div>' +
-              '<div class="g-archivo-meta">' + Archivos.formatoTamano(a.tamano) + ' · ' + a.categoria +
+              '<div class="g-archivo-meta">' + Archivos.formatoTamano(a.tamano) + ' · ' + R.escapar(a.categoria) +
               ' · ' + UI.fecha(a.creado) + (autor ? ' · ' + R.escapar(autor.nombre) : '') + '</div>' +
             '</div>' +
             '<div class="g-archivo-acciones">' +
@@ -582,7 +687,7 @@ window.VistasObra = (function () {
     var hitos = (p.hitos || []);
     var tablaHitos = hitos.length
       ? R.tabla(['Hito', 'Fecha', 'Ruta crítica'], hitos.map(function (h) {
-          return [h.nombre, UI.fecha(h.fecha), h.critico ? 'Sí' : 'No'];
+          return [R.escapar(h.nombre), UI.fecha(h.fecha), h.critico ? 'Sí' : 'No'];
         }))
       : '';
 

@@ -365,11 +365,43 @@ window.ObraAcciones = (function () {
         break;
 
       case 'doc-nueva-version': {
-        var dv = Gestor.nuevaVersion(valor('g-doc-id'));
-        recargar();
-        if (dv) Dialogo.avisar('Versión ' + dv.version + ' abierta como borrador');
+        var docVer = Gestor.uno('documentos', valor('g-doc-id'));
+        if (!docVer) return;
+        var actualN = docVer.version || 1;
+        Dialogo.confirmar({
+          titulo: 'Abrir la versión ' + (actualN + 1),
+          texto: 'Se guarda en el historial una copia de la v' + actualN + ' tal como está ahora (' +
+            ({ borrador: 'en borrador', revision: 'en revisión', aprobado: 'aprobada' }[docVer.estado] || docVer.estado) +
+            ') y el documento vuelve a borrador para seguir trabajando.',
+          confirmar: 'Abrir v' + (actualN + 1)
+        }, function () {
+          var dv = Gestor.nuevaVersion(docVer.id);
+          recargar();
+          if (dv) Dialogo.avisar('Versión ' + dv.version + ' abierta como borrador; la v' + actualN + ' queda en el historial');
+        });
         break;
       }
+
+      case 'version-restaurar': {
+        var docR = valor('g-version-doc');
+        var nR = Number(valor('g-version-n'));
+        Dialogo.confirmar({
+          titulo: 'Restaurar la versión ' + nR,
+          texto: 'El contenido actual del documento se sustituye por el de la v' + nR + ' y el documento vuelve a borrador. ' +
+            'Si quieres conservar lo actual, abre antes una versión nueva desde el documento.',
+          confirmar: 'Restaurar v' + nR, peligro: true
+        }, function () {
+          var rr = Gestor.restaurarVersion(docR, nR);
+          if (rr.error) { Dialogo.avisar(rr.error, 'error'); return; }
+          location.hash = '#/proyectos/' + proyectoId + '/documento/' + docR;
+          Dialogo.avisar('Contenido de la v' + nR + ' restaurado');
+        });
+        break;
+      }
+
+      case 'version-exportar':
+        exportarDocumento(valor('g-version-doc'), Number(valor('g-version-n')));
+        break;
 
       case 'doc-borrar': {
         var docBorrar = Gestor.uno('documentos', valor('g-doc-id'));
@@ -709,9 +741,16 @@ window.ObraAcciones = (function () {
 
   /* ══════════════ Exportación de un documento ══════════════ */
 
-  function exportarDocumento(docId) {
-    var d = Gestor.uno('documentos', docId);
-    if (!d) return;
+  /* numeroVersion: descarga esa copia del historial en lugar del documento vigente */
+  function exportarDocumento(docId, numeroVersion) {
+    var vigente = Gestor.uno('documentos', docId);
+    if (!vigente) return;
+    var copia = numeroVersion ? Gestor.versionDe(docId, numeroVersion) : null;
+    if (numeroVersion && !copia) return;
+    var d = copia
+      ? { nombre: copia.nombre, categoria: vigente.categoria, version: copia.version, estado: copia.estado,
+          contenido: copia.contenido, artefactoId: vigente.artefactoId, proyectoId: vigente.proyectoId }
+      : vigente;
     var art = Gestor.artefacto(d.artefactoId);
     var pr = Gestor.proyecto(d.proyectoId);
     var L = [];
@@ -719,7 +758,8 @@ window.ObraAcciones = (function () {
     L.push('# ' + d.nombre);
     L.push('');
     L.push('**Proyecto:** ' + pr.nombre + '  ');
-    L.push('**Categoría:** ' + d.categoria + ' · **Versión:** ' + (d.version || 1) + ' · **Estado:** ' + d.estado);
+    L.push('**Categoría:** ' + d.categoria + ' · **Versión:** ' + (d.version || 1) + ' · **Estado:** ' + d.estado +
+      (copia ? ' · copia guardada el ' + new Date(copia.creado).toLocaleDateString('es') : ''));
     L.push('');
     L.push('> ' + art.descripcion);
     L.push('');
@@ -755,7 +795,7 @@ window.ObraAcciones = (function () {
       'PMBOK y PMI son marcas registradas del Project Management Institute, Inc._');
 
     var nombre = Calidad.normalizar(d.nombre).replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 40);
-    descargar((nombre || 'documento') + '.md', L.join('\n'));
+    descargar((nombre || 'documento') + (copia ? '-v' + copia.version : '') + '.md', L.join('\n'));
   }
 
   function descargar(nombre, contenido) {

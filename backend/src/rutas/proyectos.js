@@ -311,9 +311,26 @@ planas.put('/documentos/:id/bloques/:indice', async (req, res) => {
   res.json(await docs.guardarBloque(req.params.id, req.params.indice, cuerpo.valor));
 });
 
+/* Historial: abrir una versión guarda la copia de la que se cierra */
+planas.get('/documentos/:id/versiones', async (req, res) => {
+  await proyectoDeRegistro('documentos', req.params.id, req.usuario, 'ver');
+  res.json(await docs.versiones(req.params.id));
+});
+
+planas.get('/documentos/:id/versiones/:version', async (req, res) => {
+  await proyectoDeRegistro('documentos', req.params.id, req.usuario, 'ver');
+  res.json(await docs.version(req.params.id, req.params.version));
+});
+
 planas.post('/documentos/:id/versiones', async (req, res) => {
   await proyectoDeRegistro('documentos', req.params.id, req.usuario, 'editar');
-  res.json(await docs.nuevaVersion(req.params.id));
+  const { id } = validar(z.object({ id: esquemaId.optional() }), req.body);
+  res.json(await docs.nuevaVersion(req.params.id, req.usuario.id, id));
+});
+
+planas.post('/documentos/:id/versiones/:version/restaurar', async (req, res) => {
+  await proyectoDeRegistro('documentos', req.params.id, req.usuario, 'editar');
+  res.json(await docs.restaurarVersion(req.params.id, req.params.version));
 });
 
 planas.delete('/documentos/:id', async (req, res) => {

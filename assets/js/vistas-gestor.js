@@ -402,7 +402,7 @@ window.VistasGestor = (function () {
     return '<h2>Eventos del mes</h2>' + R.tabla(['Fecha', 'Tipo', 'Evento', 'Proyecto'],
       delMes.map(function (e) {
         var p = Gestor.uno('proyectos', e.ref);
-        return [UI.fecha(e.fecha), e.tipo, e.titulo, p ? p.nombre : '—'];
+        return [UI.fecha(e.fecha), e.tipo, R.escapar(e.titulo), p ? R.escapar(p.nombre) : '—'];
       }));
   }
 

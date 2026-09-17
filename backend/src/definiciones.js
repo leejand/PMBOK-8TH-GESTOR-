@@ -289,6 +289,16 @@ const documentos = {
   orden: 'COALESCE(t.actualizado, t.creado) DESC'
 };
 
+/* Copia de un documento al cerrar una de sus versiones */
+const versiones = {
+  tabla: 'documento_versiones',
+  campos: [...DE_PROYECTO, ['documentoId', 'documento_id'], ['version', 'version'], ['nombre', 'nombre'],
+    ['estado', 'estado'], ['contenido', 'contenido'], ['aprobado', 'aprobado'], ['autorId', 'autor_id'],
+    ['creado', 'creado']],
+  json: ['contenido'],
+  orden: 't.documento_id, t.version'
+};
+
 const archivos = {
   tabla: 'archivos',
   campos: [...DE_PROYECTO, ['nombre', 'nombre'], ['tipo', 'tipo'], ['tamano', 'tamano'], ['categoria', 'categoria'],
@@ -340,5 +350,5 @@ module.exports = {
   E, NIVELES, NOMBRE_NIVEL, correo, clave,
   usuarios, permisos, portafolios, programas, proyectos,
   miembros, riesgos, interesados, cambios, lecciones, sprints, tareas, mediciones, comentarios,
-  procesosProyecto, documentos, archivos, rocas, metricas, asientos
+  procesosProyecto, documentos, versiones, archivos, rocas, metricas, asientos
 };

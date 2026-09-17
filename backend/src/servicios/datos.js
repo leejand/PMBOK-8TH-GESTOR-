@@ -27,7 +27,8 @@ const CLAVE_PROVISIONAL = 'cambiar123';
 const COLECCIONES = [
   ['usuarios', D.usuarios], ['permisos', D.permisos], ['portafolios', D.portafolios],
   ['programas', D.programas], ['proyectos', D.proyectos], ['miembros', D.miembros],
-  ['procesos', D.procesosProyecto], ['documentos', D.documentos], ['archivos', D.archivos],
+  ['procesos', D.procesosProyecto], ['documentos', D.documentos], ['versiones', D.versiones],
+  ['archivos', D.archivos],
   ['riesgos', D.riesgos], ['interesados', D.interesados], ['cambios', D.cambios],
   ['lecciones', D.lecciones], ['tareas', D.tareas], ['sprints', D.sprints],
   ['mediciones', D.mediciones], ['comentarios', D.comentarios], ['rocas', D.rocas],
@@ -36,7 +37,7 @@ const COLECCIONES = [
 
 const TABLAS_DATOS = [
   'usuarios', 'sesiones', 'permisos', 'portafolios', 'programas', 'rocas', 'metricas', 'metrica_valores',
-  'asientos', 'vto', 'proyectos', 'miembros', 'proyecto_procesos', 'documentos', 'archivos',
+  'asientos', 'vto', 'proyectos', 'miembros', 'proyecto_procesos', 'documentos', 'documento_versiones', 'archivos',
   'archivo_contenidos', 'riesgos', 'interesados', 'cambios', 'lecciones', 'sprints', 'sprint_burndown',
   'tareas', 'mediciones', 'comentarios'
 ];
@@ -307,13 +308,16 @@ async function importar(datos, usuarioActual, sesionId) {
     }
 
     const parDoc = new Set();
+    const DOC = new Map();   /* id del documento → proyecto */
     for (const x of lista('documentos')) {
       const p = ref(PR, x.proyectoId);
       const art = c.artefactosPorId[x.artefactoId];
-      if (!p || !art || parDoc.has(p + '|' + x.artefactoId)) { cuenta('documentos', false); continue; }
+      const id = idDe(x.id);
+      if (!p || !art || parDoc.has(p + '|' + x.artefactoId) || DOC.has(id)) { cuenta('documentos', false); continue; }
       const version = Math.round(Number(x.version));
+      DOC.set(id, p);
       await repo.insertarSimple(D.documentos, {
-        id: idDe(x.id), proyectoId: p, artefactoId: x.artefactoId,
+        id, proyectoId: p, artefactoId: x.artefactoId,
         nombre: requerido(x.nombre, 300) || art.nombre, categoria: txt(x.categoria || art.categoria, 80),
         version: version >= 1 ? version : 1, estado: enumOr(x.estado, D.E.estadosDocumento, 'borrador'),
         procesoId: c.flujoPorId[x.procesoId] ? x.procesoId : null,
@@ -321,6 +325,27 @@ async function importar(datos, usuarioActual, sesionId) {
         autorId: ref(U, x.autorId), aprobado: ms(x.aprobado) || null, creado: ms(x.creado)
       }, cx);
       parDoc.add(p + '|' + x.artefactoId); cuenta('documentos', true);
+    }
+
+    /* Historial de versiones: una copia por número y documento importado */
+    const parVersion = new Set();
+    const idsVersion = new Set();
+    for (const x of lista('versiones')) {
+      const doc = typeof x.documentoId === 'string' ? x.documentoId : '';
+      const numero = Math.round(Number(x.version));
+      const id = idDe(x.id);
+      const clave = doc + '|' + numero;
+      if (!DOC.has(doc) || !(numero >= 1) || parVersion.has(clave) || idsVersion.has(id)) {
+        cuenta('versiones', false); continue;
+      }
+      await repo.insertarSimple(D.versiones, {
+        id, proyectoId: DOC.get(doc), documentoId: doc, version: numero,
+        nombre: requerido(x.nombre, 300) || 'Versión ' + numero,
+        estado: enumOr(x.estado, D.E.estadosDocumento, 'borrador'),
+        contenido: esObj(x.contenido) ? x.contenido : {},
+        aprobado: ms(x.aprobado) || null, autorId: ref(U, x.autorId), creado: ms(x.creado)
+      }, cx);
+      parVersion.add(clave); idsVersion.add(id); cuenta('versiones', true);
     }
 
     const archivosExport = lista('archivos').length;
