@@ -187,7 +187,7 @@ window.VistasObra = (function () {
       '<p style="color:var(--tinta-2);font-size:13.4px;margin-bottom:14px">' +
       'Límites de tareas, sprints, hitos del cronograma y cortes de valor ganado. ' +
       'Los hitos en ruta crítica se marcan en ámbar.</p>' +
-      VistasGestor.calendario(anio, mes, eventos, '#/proyectos/' + p.id + '/calendario/') +
+      GestionAgenda.calendario(anio, mes, eventos, '#/proyectos/' + p.id + '/calendario/') +
       (puede
         ? '<h2>Añadir hito</h2><div class="pa-panel">' +
           UI.fila([
