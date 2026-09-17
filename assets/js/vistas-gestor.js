@@ -1142,289 +1142,330 @@ window.VistasGestor = (function () {
     return e;
   }
 
+  /* Cada botón «data-g» nombra aquí su acción. Cada una recibe el propio
+     botón y sus atributos «data-id» y «data-valor». */
+  var ACCIONES = {
+    /* Sesión */
+    'entrar': accionEntrar,
+    'registrarse': accionRegistrarse,
+    'unirse-proyecto': accionUnirse,
+    'cambiar-clave': accionCambiarClave,
+    'llevar-al-servidor': accionLlevarAlServidor,
+    'acceso-demo': accesoDemo,
+    'salir': salir,
+
+    /* Proyectos */
+    'abrir-nuevo-proyecto': abrirNuevoProyecto,
+    'cerrar-nuevo-proyecto': function () { alternar('g-nuevo-proyecto', false); },
+    'crear-proyecto': crearProyecto,
+
+    /* Portafolios y programas */
+    'abrir-nuevo-portafolio': function () { alternar('g-nuevo-portafolio', true); },
+    'cerrar-nuevo-portafolio': function () { alternar('g-nuevo-portafolio', false); },
+    'crear-portafolio': crearPortafolio,
+    'borrar-portafolio': borrarPortafolio,
+    'nuevo-programa': nuevoPrograma,
+
+    /* EOS · rocas */
+    'trimestre': elegirTrimestre,
+    'abrir-nueva-roca': function () { alternar('g-nueva-roca', true); },
+    'cerrar-nueva-roca': function () { alternar('g-nueva-roca', false); },
+    'crear-roca': crearRoca,
+    'borrar-roca': borrarRoca,
+    'meta-roca': alternarMetaRoca,
+
+    /* EOS · scorecard */
+    'abrir-nueva-metrica': function () { alternar('g-nueva-metrica', true); },
+    'cerrar-nueva-metrica': function () { alternar('g-nueva-metrica', false); },
+    'crear-metrica': crearMetrica,
+    'borrar-metrica': borrarMetrica,
+
+    /* EOS · organigrama */
+    'abrir-asiento': abrirAsiento,
+    'cerrar-asiento': function () { alternar('g-nuevo-asiento', false); },
+    'crear-asiento': crearAsiento,
+    'borrar-asiento': borrarAsiento,
+
+    /* Administración · cuentas */
+    'abrir-nuevo-usuario': function () { alternar('g-nuevo-usuario', true); },
+    'cerrar-nuevo-usuario': function () { alternar('g-nuevo-usuario', false); },
+    'crear-usuario': crearUsuario,
+    'alternar-usuario': alternarUsuario,
+    'clave': cambiarClaveDeCuenta,
+
+    /* Administración · permisos */
+    'permisos': abrirPermisos,
+    'cerrar-permisos': function () { document.getElementById('g-panel-permisos').innerHTML = ''; },
+    'conceder': conceder,
+    'revocar': revocar,
+
+    /* Administración · datos */
+    'exportar-bd': exportarCopia,
+    'reiniciar-bd': borrarTodosLosDatos
+  };
+
   function manejar(e) {
-    var el = e.currentTarget;
-    var accion = el.getAttribute('data-g');
-    var id = el.getAttribute('data-id');
     e.preventDefault();
+    var el = e.currentTarget;
+    var accion = ACCIONES[el.getAttribute('data-g')];
+    if (accion) accion(el, el.getAttribute('data-id'), el.getAttribute('data-valor'));
+  }
 
-    switch (accion) {
-      case 'entrar': accionEntrar(); break;
-      case 'registrarse': accionRegistrarse(); break;
-      case 'unirse-proyecto': accionUnirse(); break;
-      case 'cambiar-clave': accionCambiarClave(); break;
-      case 'llevar-al-servidor': accionLlevarAlServidor(); break;
+  /* ── Sesión ── */
 
-      case 'acceso-demo':
-        document.getElementById('acc-correo').value = 'admin@pmbok.local';
-        document.getElementById('acc-clave').value = 'admin123';
-        accionEntrar();
-        break;
+  function accesoDemo() {
+    document.getElementById('acc-correo').value = 'admin@pmbok.local';
+    document.getElementById('acc-clave').value = 'admin123';
+    accionEntrar();
+  }
 
-      case 'salir':
-        Promise.resolve(Gestor.salir()).then(function () {
-          location.hash = '#/entrar';
-          recargar();
-        });
-        break;
+  function salir() {
+    Promise.resolve(Gestor.salir()).then(function () {
+      location.hash = '#/entrar';
+      recargar();
+    });
+  }
 
-      case 'abrir-nuevo-proyecto': {
-        var form = alternar('g-nuevo-proyecto', true);
-        var nombre = document.getElementById('np-nombre');
-        if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        if (nombre) setTimeout(function () { nombre.focus(); }, 60);
-        break;
-      }
-      case 'cerrar-nuevo-proyecto': alternar('g-nuevo-proyecto', false); break;
+  /* ── Proyectos ── */
 
-      case 'crear-proyecto': {
-        ocupado('[data-g="crear-proyecto"]', true);
-        var pendiente = Gestor.crearProyecto({
-          nombre: UI.valorDe('np-nombre'),
-          descripcion: UI.valorDe('np-descripcion'),
-          metodologia: UI.valorDe('val-metodologia'),
-          portafolioId: UI.valorDe('np-portafolio') || null,
-          rocaId: UI.valorDe('np-roca') || null,
-          inicio: UI.valorDe('np-inicio'),
-          fin: UI.valorDe('np-fin'),
-          presupuesto: UI.numeroDe('np-presupuesto', null)
-        });
-        Promise.resolve(pendiente).then(function (r) {
-          ocupado('[data-g="crear-proyecto"]', false);
-          if (r.error) { error('g-error-proyecto', r.error); return; }
-          location.hash = '#/proyectos/' + r.proyecto.id;
-          Dialogo.avisar('Proyecto creado. Empieza por 2.1.1 Iniciar el Proyecto o Fase', 'ok', {
-            etiqueta: 'Abrir 2.1.1',
-            hacer: function () { location.hash = '#/proyectos/' + r.proyecto.id + '/proceso/p-gob-01'; }
-          });
-        });
-        break;
-      }
+  function abrirNuevoProyecto() {
+    var form = alternar('g-nuevo-proyecto', true);
+    var nombre = document.getElementById('np-nombre');
+    if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (nombre) setTimeout(function () { nombre.focus(); }, 60);
+  }
 
-      case 'abrir-nuevo-portafolio': alternar('g-nuevo-portafolio', true); break;
-      case 'cerrar-nuevo-portafolio': alternar('g-nuevo-portafolio', false); break;
+  function crearProyecto() {
+    ocupado('[data-g="crear-proyecto"]', true);
+    var pendiente = Gestor.crearProyecto({
+      nombre: UI.valorDe('np-nombre'),
+      descripcion: UI.valorDe('np-descripcion'),
+      metodologia: UI.valorDe('val-metodologia'),
+      portafolioId: UI.valorDe('np-portafolio') || null,
+      rocaId: UI.valorDe('np-roca') || null,
+      inicio: UI.valorDe('np-inicio'),
+      fin: UI.valorDe('np-fin'),
+      presupuesto: UI.numeroDe('np-presupuesto', null)
+    });
+    Promise.resolve(pendiente).then(function (r) {
+      ocupado('[data-g="crear-proyecto"]', false);
+      if (r.error) { error('g-error-proyecto', r.error); return; }
+      location.hash = '#/proyectos/' + r.proyecto.id;
+      Dialogo.avisar('Proyecto creado. Empieza por 2.1.1 Iniciar el Proyecto o Fase', 'ok', {
+        etiqueta: 'Abrir 2.1.1',
+        hacer: function () { location.hash = '#/proyectos/' + r.proyecto.id + '/proceso/p-gob-01'; }
+      });
+    });
+  }
 
-      case 'crear-portafolio': {
-        var n = UI.valorDe('npf-nombre');
-        if (!n.trim()) return;
-        Gestor.crear('portafolios', { nombre: n.trim(), descripcion: UI.valorDe('npf-descripcion') });
-        recargar();
-        break;
-      }
+  /* ── Portafolios y programas ── */
 
-      case 'borrar-portafolio': {
-        var pf = Gestor.uno('portafolios', id);
-        var afectados = Gestor.lista('proyectos', { portafolioId: id }).length;
-        Dialogo.confirmar({
-          titulo: 'Eliminar «' + (pf ? pf.nombre : 'portafolio') + '»',
-          texto: afectados
-            ? 'Sus ' + afectados + ' proyecto' + (afectados === 1 ? '' : 's') + ' no se borran: quedan sin portafolio.'
-            : 'El portafolio está vacío.',
-          confirmar: 'Eliminar portafolio', peligro: true
-        }, function () {
-          Gestor.borrarPortafolio(id);
-          Dialogo.avisar('Portafolio eliminado');
-          recargar();
-        });
-        break;
-      }
+  function crearPortafolio() {
+    var nombre = UI.valorDe('npf-nombre');
+    if (!nombre.trim()) return;
+    Gestor.crear('portafolios', { nombre: nombre.trim(), descripcion: UI.valorDe('npf-descripcion') });
+    recargar();
+  }
 
-      case 'nuevo-programa':
-        Dialogo.pedir({
-          titulo: 'Nuevo programa',
-          texto: 'Un programa agrupa proyectos relacionados cuyos beneficios se gestionan juntos.',
-          campos: [{ id: 'nombre', etiqueta: 'Nombre del programa', placeholder: 'Ej.: Modernización de nómina' }],
-          confirmar: 'Crear programa'
-        }, function (v) {
-          if (!v.nombre.trim()) return;
-          Gestor.crear('programas', { portafolioId: id, nombre: v.nombre.trim() });
-          Dialogo.avisar('Programa creado');
-          recargar();
-        });
-        break;
+  function borrarPortafolio(el, id) {
+    var pf = Gestor.uno('portafolios', id);
+    var afectados = Gestor.lista('proyectos', { portafolioId: id }).length;
+    Dialogo.confirmar({
+      titulo: 'Eliminar «' + (pf ? pf.nombre : 'portafolio') + '»',
+      texto: afectados
+        ? 'Sus ' + afectados + ' proyecto' + (afectados === 1 ? '' : 's') + ' no se borran: quedan sin portafolio.'
+        : 'El portafolio está vacío.',
+      confirmar: 'Eliminar portafolio', peligro: true
+    }, function () {
+      Gestor.borrarPortafolio(id);
+      Dialogo.avisar('Portafolio eliminado');
+      recargar();
+    });
+  }
 
-      case 'trimestre':
-        VistasGestor.trimestreElegido = el.getAttribute('data-valor');
-        recargar();
-        break;
+  function nuevoPrograma(el, id) {
+    Dialogo.pedir({
+      titulo: 'Nuevo programa',
+      texto: 'Un programa agrupa proyectos relacionados cuyos beneficios se gestionan juntos.',
+      campos: [{ id: 'nombre', etiqueta: 'Nombre del programa', placeholder: 'Ej.: Modernización de nómina' }],
+      confirmar: 'Crear programa'
+    }, function (v) {
+      if (!v.nombre.trim()) return;
+      Gestor.crear('programas', { portafolioId: id, nombre: v.nombre.trim() });
+      Dialogo.avisar('Programa creado');
+      recargar();
+    });
+  }
 
-      case 'abrir-nueva-roca': alternar('g-nueva-roca', true); break;
-      case 'cerrar-nueva-roca': alternar('g-nueva-roca', false); break;
+  /* ── EOS · rocas ── */
 
-      case 'crear-roca': {
-        var t = UI.valorDe('nr-titulo');
-        if (!t.trim()) return;
-        Gestor.crear('rocas', {
-          trimestre: VistasGestor.trimestreElegido || trimestreActual(),
-          titulo: t.trim(),
-          descripcion: UI.valorDe('nr-descripcion'),
-          responsableId: UI.valorDe('nr-responsable'),
-          estado: UI.valorDe('nr-estado'),
-          metas: UI.valorDe('nr-metas').split('\n').filter(function (x) { return x.trim(); })
-            .map(function (x) { return { texto: x.trim(), hecho: false }; })
-        });
-        recargar();
-        break;
-      }
+  function elegirTrimestre(el, id, val) {
+    VistasGestor.trimestreElegido = val;
+    recargar();
+  }
 
-      case 'borrar-roca':
-        Dialogo.confirmar({
-          titulo: 'Eliminar esta roca',
-          texto: 'Los proyectos vinculados no se borran, solo pierden el vínculo con ella.',
-          confirmar: 'Eliminar roca', peligro: true
-        }, function () { Gestor.borrar('rocas', id); Dialogo.avisar('Roca eliminada'); recargar(); });
-        break;
+  function crearRoca() {
+    var titulo = UI.valorDe('nr-titulo');
+    if (!titulo.trim()) return;
+    Gestor.crear('rocas', {
+      trimestre: VistasGestor.trimestreElegido || trimestreActual(),
+      titulo: titulo.trim(),
+      descripcion: UI.valorDe('nr-descripcion'),
+      responsableId: UI.valorDe('nr-responsable'),
+      estado: UI.valorDe('nr-estado'),
+      metas: UI.valorDe('nr-metas').split('\n').filter(function (x) { return x.trim(); })
+        .map(function (x) { return { texto: x.trim(), hecho: false }; })
+    });
+    recargar();
+  }
 
-      case 'meta-roca': {
-        var roca = Gestor.uno('rocas', id);
-        var i = parseInt(el.getAttribute('data-i'), 10);
-        if (roca && roca.metas && roca.metas[i]) {
-          roca.metas[i].hecho = !roca.metas[i].hecho;
-          Gestor.actualizar('rocas', id, { metas: roca.metas });
-          recargar();
-        }
-        break;
-      }
+  function borrarRoca(el, id) {
+    Dialogo.confirmar({
+      titulo: 'Eliminar esta roca',
+      texto: 'Los proyectos vinculados no se borran, solo pierden el vínculo con ella.',
+      confirmar: 'Eliminar roca', peligro: true
+    }, function () { Gestor.borrar('rocas', id); Dialogo.avisar('Roca eliminada'); recargar(); });
+  }
 
-      case 'abrir-nueva-metrica': alternar('g-nueva-metrica', true); break;
-      case 'cerrar-nueva-metrica': alternar('g-nueva-metrica', false); break;
-
-      case 'crear-metrica': {
-        var nm = UI.valorDe('nm-nombre');
-        if (!nm.trim()) return;
-        Gestor.crear('metricas', {
-          nombre: nm.trim(), meta: UI.valorDe('nm-meta'),
-          responsableId: UI.valorDe('nm-responsable'),
-          direccion: UI.valorDe('nm-direccion'), valores: {}
-        });
-        recargar();
-        break;
-      }
-
-      case 'borrar-metrica':
-        Dialogo.confirmar({
-          titulo: 'Eliminar la métrica',
-          texto: 'Se pierden también sus 13 semanas de historial.',
-          confirmar: 'Eliminar métrica', peligro: true
-        }, function () { Gestor.borrar('metricas', id); Dialogo.avisar('Métrica eliminada'); recargar(); });
-        break;
-
-      case 'abrir-asiento':
-        alternar('g-nuevo-asiento', true);
-        document.getElementById('na-padre').value = el.getAttribute('data-padre') || '';
-        break;
-      case 'cerrar-asiento': alternar('g-nuevo-asiento', false); break;
-
-      case 'crear-asiento': {
-        var na = UI.valorDe('na-nombre');
-        if (!na.trim()) return;
-        Gestor.crear('asientos', {
-          nombre: na.trim(), gwt: UI.valorDe('na-gwt'),
-          personaId: UI.valorDe('na-persona') || null,
-          padreId: UI.valorDe('na-padre') || null
-        });
-        recargar();
-        break;
-      }
-
-      case 'borrar-asiento':
-        Dialogo.confirmar({
-          titulo: 'Eliminar el asiento',
-          texto: 'También se eliminan los asientos que dependen de él.',
-          confirmar: 'Eliminar asiento', peligro: true
-        }, function () {
-          (function borrarRama(padre) {
-            Gestor.asientosHijos(padre).forEach(function (a) { borrarRama(a.id); Gestor.borrar('asientos', a.id); });
-          })(id);
-          Gestor.borrar('asientos', id);
-          Dialogo.avisar('Asiento eliminado');
-          recargar();
-        });
-        break;
-
-      case 'abrir-nuevo-usuario': alternar('g-nuevo-usuario', true); break;
-      case 'cerrar-nuevo-usuario': alternar('g-nuevo-usuario', false); break;
-
-      case 'crear-usuario': {
-        var ru = Gestor.crearUsuario({
-          nombre: UI.valorDe('nu-nombre'), correo: UI.valorDe('nu-correo'),
-          clave: UI.valorDe('nu-clave'), rol: UI.valorDe('nu-rol')
-        });
-        if (ru.error) { error('g-error-usuario', ru.error); return; }
-        recargar();
-        break;
-      }
-
-      case 'alternar-usuario': {
-        var us = Gestor.uno('usuarios', id);
-        if (us) { Gestor.actualizar('usuarios', id, { activo: !us.activo }); recargar(); }
-        break;
-      }
-
-      case 'clave': {
-        var cuenta = Gestor.uno('usuarios', id);
-        Dialogo.pedir({
-          titulo: 'Cambiar contraseña',
-          texto: cuenta ? 'Cuenta de ' + Render.escapar(cuenta.nombre) + '.' : '',
-          campos: [{ id: 'clave', etiqueta: 'Nueva contraseña', tipo: 'password', ayuda: 'Mínimo 6 caracteres' }],
-          confirmar: 'Cambiar contraseña'
-        }, function (v) {
-          var rc = Gestor.cambiarClave(id, v.clave);
-          Dialogo.avisar(rc.error || 'Contraseña actualizada', rc.error ? 'error' : 'ok');
-        });
-        break;
-      }
-
-      case 'permisos':
-        document.getElementById('g-panel-permisos').innerHTML = panelPermisos(id);
-        conectar('admin', '', recargar);
-        document.getElementById('g-permisos-abierto').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        break;
-
-      case 'cerrar-permisos':
-        document.getElementById('g-panel-permisos').innerHTML = '';
-        break;
-
-      case 'conceder': {
-        var partes = UI.valorDe('perm-ambito').split(':');
-        Gestor.conceder(UI.valorDe('perm-usuario'), partes[0], partes[1], UI.valorDe('perm-nivel'));
-        var abierto = UI.valorDe('perm-usuario');
-        recargar();
-        setTimeout(function () {
-          var caja = document.getElementById('g-panel-permisos');
-          if (caja) { caja.innerHTML = panelPermisos(abierto); conectar('admin', '', recargar); }
-        }, 30);
-        break;
-      }
-
-      case 'revocar': {
-        Gestor.revocar(id);
-        recargar();
-        break;
-      }
-
-      case 'exportar-bd':
-        Promise.resolve(Gestor.exportarTodo()).then(function (datos) {
-          descargar('pmbok8-gestor.json', JSON.stringify(datos, null, 2));
-        }, function (err) { Dialogo.avisar('No se pudo exportar: ' + err.message, 'error'); });
-        break;
-
-      case 'reiniciar-bd':
-        Dialogo.confirmar({
-          titulo: 'Borrar todos los datos',
-          texto: 'Se eliminan <b>todos</b> los proyectos, documentos, usuarios y datos de gerencia ' +
-            (Gestor.enServidor() ? 'del servidor' : 'de este navegador') + '. ' +
-            'No se puede deshacer: exporta antes si quieres conservarlos.',
-          confirmar: 'Borrar todo', peligro: true
-        }, function () {
-          Promise.resolve(Gestor.reiniciarTodo()).then(function (r) {
-            if (r && r.error) { Dialogo.avisar(r.error, 'error'); return; }
-            location.hash = '#/entrar';
-            recargar();
-          });
-        });
-        break;
+  function alternarMetaRoca(el, id) {
+    var roca = Gestor.uno('rocas', id);
+    var i = parseInt(el.getAttribute('data-i'), 10);
+    if (roca && roca.metas && roca.metas[i]) {
+      roca.metas[i].hecho = !roca.metas[i].hecho;
+      Gestor.actualizar('rocas', id, { metas: roca.metas });
+      recargar();
     }
+  }
+
+  /* ── EOS · scorecard ── */
+
+  function crearMetrica() {
+    var nombre = UI.valorDe('nm-nombre');
+    if (!nombre.trim()) return;
+    Gestor.crear('metricas', {
+      nombre: nombre.trim(), meta: UI.valorDe('nm-meta'),
+      responsableId: UI.valorDe('nm-responsable'),
+      direccion: UI.valorDe('nm-direccion'), valores: {}
+    });
+    recargar();
+  }
+
+  function borrarMetrica(el, id) {
+    Dialogo.confirmar({
+      titulo: 'Eliminar la métrica',
+      texto: 'Se pierden también sus 13 semanas de historial.',
+      confirmar: 'Eliminar métrica', peligro: true
+    }, function () { Gestor.borrar('metricas', id); Dialogo.avisar('Métrica eliminada'); recargar(); });
+  }
+
+  /* ── EOS · organigrama ── */
+
+  function abrirAsiento(el) {
+    alternar('g-nuevo-asiento', true);
+    document.getElementById('na-padre').value = el.getAttribute('data-padre') || '';
+  }
+
+  function crearAsiento() {
+    var nombre = UI.valorDe('na-nombre');
+    if (!nombre.trim()) return;
+    Gestor.crear('asientos', {
+      nombre: nombre.trim(), gwt: UI.valorDe('na-gwt'),
+      personaId: UI.valorDe('na-persona') || null,
+      padreId: UI.valorDe('na-padre') || null
+    });
+    recargar();
+  }
+
+  function borrarAsiento(el, id) {
+    Dialogo.confirmar({
+      titulo: 'Eliminar el asiento',
+      texto: 'También se eliminan los asientos que dependen de él.',
+      confirmar: 'Eliminar asiento', peligro: true
+    }, function () {
+      (function borrarRama(padre) {
+        Gestor.asientosHijos(padre).forEach(function (a) { borrarRama(a.id); Gestor.borrar('asientos', a.id); });
+      })(id);
+      Gestor.borrar('asientos', id);
+      Dialogo.avisar('Asiento eliminado');
+      recargar();
+    });
+  }
+
+  /* ── Administración · cuentas ── */
+
+  function crearUsuario() {
+    var r = Gestor.crearUsuario({
+      nombre: UI.valorDe('nu-nombre'), correo: UI.valorDe('nu-correo'),
+      clave: UI.valorDe('nu-clave'), rol: UI.valorDe('nu-rol')
+    });
+    if (r.error) { error('g-error-usuario', r.error); return; }
+    recargar();
+  }
+
+  function alternarUsuario(el, id) {
+    var u = Gestor.uno('usuarios', id);
+    if (u) { Gestor.actualizar('usuarios', id, { activo: !u.activo }); recargar(); }
+  }
+
+  function cambiarClaveDeCuenta(el, id) {
+    var cuenta = Gestor.uno('usuarios', id);
+    Dialogo.pedir({
+      titulo: 'Cambiar contraseña',
+      texto: cuenta ? 'Cuenta de ' + Render.escapar(cuenta.nombre) + '.' : '',
+      campos: [{ id: 'clave', etiqueta: 'Nueva contraseña', tipo: 'password', ayuda: 'Mínimo 6 caracteres' }],
+      confirmar: 'Cambiar contraseña'
+    }, function (v) {
+      var r = Gestor.cambiarClave(id, v.clave);
+      Dialogo.avisar(r.error || 'Contraseña actualizada', r.error ? 'error' : 'ok');
+    });
+  }
+
+  /* ── Administración · permisos ── */
+
+  function abrirPermisos(el, id) {
+    document.getElementById('g-panel-permisos').innerHTML = panelPermisos(id);
+    conectar('admin', '', recargar);
+    document.getElementById('g-permisos-abierto').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function conceder() {
+    var partes = UI.valorDe('perm-ambito').split(':');
+    Gestor.conceder(UI.valorDe('perm-usuario'), partes[0], partes[1], UI.valorDe('perm-nivel'));
+    var abierto = UI.valorDe('perm-usuario');
+    recargar();
+    setTimeout(function () {
+      var caja = document.getElementById('g-panel-permisos');
+      if (caja) { caja.innerHTML = panelPermisos(abierto); conectar('admin', '', recargar); }
+    }, 30);
+  }
+
+  function revocar(el, id) {
+    Gestor.revocar(id);
+    recargar();
+  }
+
+  /* ── Administración · datos ── */
+
+  function exportarCopia() {
+    Promise.resolve(Gestor.exportarTodo()).then(function (datos) {
+      descargar('pmbok8-gestor.json', JSON.stringify(datos, null, 2));
+    }, function (err) { Dialogo.avisar('No se pudo exportar: ' + err.message, 'error'); });
+  }
+
+  function borrarTodosLosDatos() {
+    Dialogo.confirmar({
+      titulo: 'Borrar todos los datos',
+      texto: 'Se eliminan <b>todos</b> los proyectos, documentos, usuarios y datos de gerencia ' +
+        (Gestor.enServidor() ? 'del servidor' : 'de este navegador') + '. ' +
+        'No se puede deshacer: exporta antes si quieres conservarlos.',
+      confirmar: 'Borrar todo', peligro: true
+    }, function () {
+      Promise.resolve(Gestor.reiniciarTodo()).then(function (r) {
+        if (r && r.error) { Dialogo.avisar(r.error, 'error'); return; }
+        location.hash = '#/entrar';
+        recargar();
+      });
+    });
   }
 
   function descargar(nombre, contenido) {

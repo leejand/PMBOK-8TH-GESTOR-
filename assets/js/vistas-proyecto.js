@@ -695,113 +695,114 @@ window.VistasProyecto = (function () {
     }
   }
 
+  /* Cada botón «data-pa» nombra aquí su acción. Cada una recibe el propio
+     botón y los atributos «data-s» (sección) y «data-c» (campo). */
+  var ACCIONES = {
+    'guardar-pegado': guardarPegado,
+    'aplicar-sugerencias': aplicarSugerencias,
+    'quitar-doc': quitarDocumento,
+    'usar-sugerencia': usarSugerencia,
+    'ver-ejemplo': verEjemplo,
+    'copiar-ejemplo': copiarEjemplo,
+    'proceso': alternarProceso,
+    'verificar': function () { recargarVista(); },
+    'exportar-json': exportarJson,
+    'exportar-md': exportarMarkdown,
+    'imprimir': function () { window.print(); },
+    'reiniciar': reiniciarPlan
+  };
+
   function manejar(e) {
+    e.preventDefault();
     var el = e.currentTarget;
-    var accion = el.getAttribute('data-pa');
-    var s = el.getAttribute('data-s');
-    var c = el.getAttribute('data-c');
+    var accion = ACCIONES[el.getAttribute('data-pa')];
+    if (accion) accion(el, el.getAttribute('data-s'), el.getAttribute('data-c'));
+  }
 
-    if (accion === 'guardar-pegado') {
-      e.preventDefault();
-      var area = document.getElementById('pa-texto-pegado');
-      if (!area || !area.value.trim()) { avisoCarga('Pega primero el texto del proyecto.', 'alerta'); return; }
-      Proyecto.guardarTextoPegado(area.value, 'Texto pegado', function (err) {
-        if (err) { avisoCarga(err, 'alerta'); return; }
-        recargarVista();
-      });
-
-    } else if (accion === 'aplicar-sugerencias') {
-      e.preventDefault();
-      var n = Proyecto.aplicarSugerencias();
+  function guardarPegado() {
+    var area = document.getElementById('pa-texto-pegado');
+    if (!area || !area.value.trim()) { avisoCarga('Pega primero el texto del proyecto.', 'alerta'); return; }
+    Proyecto.guardarTextoPegado(area.value, 'Texto pegado', function (err) {
+      if (err) { avisoCarga(err, 'alerta'); return; }
       recargarVista();
-      Dialogo.avisar(n
-        ? n + ' campos rellenados con extractos de tu documento: revísalos'
-        : 'No quedaban campos vacíos que rellenar', n ? 'ok' : 'aviso');
+    });
+  }
 
-    } else if (accion === 'quitar-doc') {
-      e.preventDefault();
-      Dialogo.confirmar({
-        titulo: 'Quitar el documento cargado',
-        texto: 'Lo que ya hayas escrito en las secciones se conserva; solo se pierden las propuestas de extracción.',
-        confirmar: 'Quitar documento'
-      }, function () {
-        Proyecto.borrarDocumento();
-        recargarVista();
-      });
+  function aplicarSugerencias() {
+    var n = Proyecto.aplicarSugerencias();
+    recargarVista();
+    Dialogo.avisar(n
+      ? n + ' campos rellenados con extractos de tu documento: revísalos'
+      : 'No quedaban campos vacíos que rellenar', n ? 'ok' : 'aviso');
+  }
 
-    } else if (accion === 'usar-sugerencia') {
-      e.preventDefault();
-      var sug = Proyecto.sugerencia(s, c);
-      if (!sug) return;
-      var campoEl = document.getElementById('pa-in-' + s + '-' + c);
-      if (campoEl) {
-        campoEl.value = sug.texto;
-        guardarCampo(campoEl);
-        campoEl.focus();
-      }
-
-    } else if (accion === 'ver-ejemplo') {
-      e.preventDefault();
-      var caja = document.getElementById('pa-ej-' + s + '-' + c);
-      if (caja) {
-        caja.hidden = !caja.hidden;
-        el.textContent = caja.hidden ? 'Ver ejemplo desarrollado' : 'Ocultar ejemplo';
-      }
-
-    } else if (accion === 'copiar-ejemplo') {
-      e.preventDefault();
-      var campoDef = Proyecto.campo(s, c);
-      var destino = document.getElementById('pa-in-' + s + '-' + c);
-      if (campoDef && destino) {
-        var copiar = function () {
-          var anterior = destino.value;
-          destino.value = campoDef.ejemplo;
-          guardarCampo(destino);
-          destino.focus();
-          Dialogo.avisar('Ejemplo copiado: sustitúyelo por tus datos', 'ok', anterior ? {
-            etiqueta: 'Deshacer',
-            hacer: function () { destino.value = anterior; guardarCampo(destino); }
-          } : null);
-        };
-        copiar();
-      }
-
-    } else if (accion === 'proceso') {
-      e.preventDefault();
-      var id = el.getAttribute('data-id');
-      var activo = Proyecto.alternarProceso(id);
-      el.classList.toggle('activo', activo);
-      el.setAttribute('aria-pressed', String(activo));
-      el.parentNode.classList.toggle('marcado', activo);
-
-    } else if (accion === 'verificar') {
-      e.preventDefault();
+  function quitarDocumento() {
+    Dialogo.confirmar({
+      titulo: 'Quitar el documento cargado',
+      texto: 'Lo que ya hayas escrito en las secciones se conserva; solo se pierden las propuestas de extracción.',
+      confirmar: 'Quitar documento'
+    }, function () {
+      Proyecto.borrarDocumento();
       recargarVista();
+    });
+  }
 
-    } else if (accion === 'exportar-json') {
-      e.preventDefault();
-      descargar('pmbok8-proyecto.json', JSON.stringify(Proyecto.exportarJSON(), null, 2), 'application/json');
+  function usarSugerencia(el, s, c) {
+    var sug = Proyecto.sugerencia(s, c);
+    if (!sug) return;
+    var campo = document.getElementById('pa-in-' + s + '-' + c);
+    if (!campo) return;
+    campo.value = sug.texto;
+    guardarCampo(campo);
+    campo.focus();
+  }
 
-    } else if (accion === 'exportar-md') {
-      e.preventDefault();
-      var ev = Calidad.evaluarProyecto(Proyecto.cargar());
-      descargar(nombreArchivo() + '-pmbok8.md', Proyecto.informeMarkdown(ev), 'text/markdown');
+  function verEjemplo(el, s, c) {
+    var caja = document.getElementById('pa-ej-' + s + '-' + c);
+    if (!caja) return;
+    caja.hidden = !caja.hidden;
+    el.textContent = caja.hidden ? 'Ver ejemplo desarrollado' : 'Ocultar ejemplo';
+  }
 
-    } else if (accion === 'imprimir') {
-      e.preventDefault();
-      window.print();
+  function copiarEjemplo(el, s, c) {
+    var campoDef = Proyecto.campo(s, c);
+    var destino = document.getElementById('pa-in-' + s + '-' + c);
+    if (!campoDef || !destino) return;
+    var anterior = destino.value;
+    destino.value = campoDef.ejemplo;
+    guardarCampo(destino);
+    destino.focus();
+    Dialogo.avisar('Ejemplo copiado: sustitúyelo por tus datos', 'ok', anterior ? {
+      etiqueta: 'Deshacer',
+      hacer: function () { destino.value = anterior; guardarCampo(destino); }
+    } : null);
+  }
 
-    } else if (accion === 'reiniciar') {
-      e.preventDefault();
-      Dialogo.confirmar({
-        titulo: 'Vaciar el plan de calidad',
-        texto: 'Se borran el documento cargado, los campos redactados y el historial de puntajes de este proyecto.',
-        confirmar: 'Vaciar plan', peligro: true
-      }, function () {
-        Proyecto.reiniciar();
-        recargarVista();
-      });
-    }
+  function alternarProceso(el) {
+    var activo = Proyecto.alternarProceso(el.getAttribute('data-id'));
+    el.classList.toggle('activo', activo);
+    el.setAttribute('aria-pressed', String(activo));
+    el.parentNode.classList.toggle('marcado', activo);
+  }
+
+  function exportarJson() {
+    descargar('pmbok8-proyecto.json', JSON.stringify(Proyecto.exportarJSON(), null, 2), 'application/json');
+  }
+
+  function exportarMarkdown() {
+    var ev = Calidad.evaluarProyecto(Proyecto.cargar());
+    descargar(nombreArchivo() + '-pmbok8.md', Proyecto.informeMarkdown(ev), 'text/markdown');
+  }
+
+  function reiniciarPlan() {
+    Dialogo.confirmar({
+      titulo: 'Vaciar el plan de calidad',
+      texto: 'Se borran el documento cargado, los campos redactados y el historial de puntajes de este proyecto.',
+      confirmar: 'Vaciar plan', peligro: true
+    }, function () {
+      Proyecto.reiniciar();
+      recargarVista();
+    });
   }
 
   /* — Edición con guardado y verificación en vivo — */
