@@ -45,7 +45,6 @@ PostgreSQL tiene que estar en marcha para las dos baterías. Las pruebas nunca t
 - `gestor.js` es la única capa de datos, con una **interfaz síncrona para las vistas en los dos modos**. En modo servidor carga `GET /api/estado` en memoria (con la misma forma que la base local), aplica cada cambio al instante sobre esa copia y pasa la petición a `remoto.js`. Ese módulo envía las peticiones una tras otra y en orden, agrupa las ediciones seguidas de una misma clave y, si algo falla, avisa y recarga el estado real. Toda operación nueva de `Gestor` necesita su rama local y su `Remoto.enviar` correspondiente.
 - Los identificadores los genera el navegador (para pintar sin esperar y poder «Deshacer»). La API los acepta (`[A-Za-z0-9_.:-]`, hasta 100 caracteres) y responde 409 si ya existen.
 - Nunca `alert`/`confirm`/`prompt`: se usa `dialogos.js` (diálogos propios, avisos y deshacer). Los gráficos son SVG hechos a mano en `graficos.js`, sin bibliotecas. Los iconos van incrustados en `iconos.js` para funcionar sin conexión.
-- `respaldo-interfaz-anterior/` es una copia de la interfaz anterior. No la carga nada: no se edita.
 
 ### Contenido (`assets/js/datos/`): única fuente de verdad
 Todo el contenido de la guía (procesos con su ITTO, bandas del flujo, plantillas de artefactos, herramientas, dominios, principios, EOS y las 10 secciones de calidad con sus reglas) vive en archivos de datos que rellenan `window.PMBOK`. El backend, en `src/catalogo.js`, ejecuta esos mismos archivos en un contexto `vm` al arrancar y sincroniza `catalogo_procesos` / `catalogo_artefactos`, que sirven de claves foráneas. Cambiar el contenido no requiere tocar la lógica, y el backend lo recoge al reiniciarse. Tipos de bloque de plantilla: `texto`, `campo`, `lista`, `tabla`. Los tipos de regla de calidad y las verificaciones de coherencia entre secciones están implementados en `calidad.js` y se referencian por nombre desde `secciones-proyecto.js`.
@@ -65,6 +64,6 @@ Añadir una colección persistente nueva suele tocar: una migración, `definicio
 - `tests/e2e/*.spec.js`: manejan la interfaz en Edge contra `tests/e2e/servidor-e2e.js`. Las ayudas están en `ayuda-e2e.js`.
 
 ## Notas
-- `.agents/skills/` contiene skills de diseño de interfaz de terceros (registradas en `skills-lock.json`). No son código de la aplicación.
+- `.agents/skills/` (y `skills-lock.json`) son skills de diseño de terceros que se usan en este equipo; `.claude/skills` enlaza a ellas. No son código de la aplicación y git las ignora.
 - Los datos de PostgreSQL deben quedar fuera de OneDrive: la sincronización corrompe un clúster vivo.
 - Restricción legal: la estructura sigue el índice público del PMBOK 8, pero todos los textos explicativos son propios. No copies texto del PMI en los archivos de datos.

@@ -235,19 +235,21 @@ dirigir un proyecto:
 
 ## Dónde viven los datos
 
-Todo en el navegador:
+Depende del modo. En ninguno de los dos hay telemetría ni se envía nada fuera del equipo.
+
+### En modo local
+
+Todo queda en el navegador:
 
 - `localStorage` para la base del gestor y el tema visual.
 - `IndexedDB` para el contenido de los archivos subidos, con respaldo en `localStorage`
   (máximo 600 KB por archivo) cuando IndexedDB no está disponible.
 
-No hay servidor ni telemetría. El control de acceso **separa espacios de trabajo entre compañeros;
-no protege secretos**: cualquiera con acceso al equipo puede leer el almacenamiento del navegador.
+El control de acceso **separa espacios de trabajo entre compañeros; no protege secretos**:
+cualquiera con acceso al equipo puede leer el almacenamiento del navegador.
 
 Para conservar el trabajo o llevarlo a otro equipo: **Exportar datos** en Administración
 (la base completa, sin contraseñas) o **Exportar plan e informe** dentro de cada proyecto.
-
-Lo anterior describe el **modo local**.
 
 ### En modo servidor
 

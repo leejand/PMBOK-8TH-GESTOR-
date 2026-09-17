@@ -5,8 +5,11 @@ node_modules/
 backend/.env
 .env
 .claude/settings.local.json
-# Enlaces simbólicos con rutas absolutas a .agents/skills
+# Skills de terceros para el asistente: se usan en este equipo, no son
+# parte de la aplicación (.claude/skills enlaza a .agents/skills)
 .claude/skills/
+.agents/
+skills-lock.json
 
 # Registros y temporales
 *.log
