@@ -13,6 +13,7 @@ const catalogo = require('../catalogo');
 const svc = require('../servicios/proyectos');
 const datos = require('../servicios/datos');
 const estado = require('../servicios/estado');
+const concurrencia = require('../concurrencia');
 const { z, validar, limpiar } = require('../validacion');
 const { requerirGestion, requerirRol } = require('../middleware/auth');
 const { recursoGlobal } = require('./recursos');
@@ -57,20 +58,28 @@ const metricas = recursoGlobal(D.metricas, {
 
 /* Una celda del scorecard; vacía la borra */
 metricas.put('/:id/valores/:semana', requerirGestion, async (req, res) => {
+  const antes = concurrencia.extraerAntes(req.body);
   const { valor } = validar(z.object({ valor: z.union([z.string().max(50), z.number(), z.null()]) }), req.body);
   const semana = req.params.semana;
   if (semana.length > 20) throw peticionInvalida('La semana no es válida.');
-  const m = await db.uno('SELECT id FROM metricas WHERE id = $1', [req.params.id]);
-  if (!m) throw noEncontrado('No existe la métrica.');
   const texto = valor === null ? '' : String(valor).trim();
-  if (texto) {
-    await db.consulta(
-      `INSERT INTO metrica_valores (metrica_id, semana, valor) VALUES ($1, $2, $3)
-       ON CONFLICT (metrica_id, semana) DO UPDATE SET valor = EXCLUDED.valor`, [m.id, semana, texto]);
-  } else {
-    await db.consulta('DELETE FROM metrica_valores WHERE metrica_id = $1 AND semana = $2', [m.id, semana]);
-  }
-  res.json(await repo.obtener(D.metricas, m.id));
+  const metrica = await db.transaccion(async (cx) => {
+    const m = await db.uno('SELECT id FROM metricas WHERE id = $1 FOR UPDATE', [req.params.id], cx);
+    if (!m) throw noEncontrado('No existe la métrica.');
+    if (antes) {
+      const previo = await db.uno('SELECT valor FROM metrica_valores WHERE metrica_id = $1 AND semana = $2', [m.id, semana], cx);
+      concurrencia.comprobarValor(previo ? previo.valor : null, antes.valor, texto, 'semana ' + semana);
+    }
+    if (texto) {
+      await db.consulta(
+        `INSERT INTO metrica_valores (metrica_id, semana, valor) VALUES ($1, $2, $3)
+         ON CONFLICT (metrica_id, semana) DO UPDATE SET valor = EXCLUDED.valor`, [m.id, semana, texto], cx);
+    } else {
+      await db.consulta('DELETE FROM metrica_valores WHERE metrica_id = $1 AND semana = $2', [m.id, semana], cx);
+    }
+    return repo.obtener(D.metricas, m.id, cx);
+  });
+  res.json(metrica);
 });
 
 /* Organigrama: un asiento no puede colgar de sí mismo ni de un descendiente */
@@ -96,17 +105,27 @@ vto.get('/', async (_req, res) => {
 });
 
 vto.put('/:bloqueId', requerirGestion, async (req, res) => {
+  const antes = concurrencia.extraerAntes(req.body);
   const { texto } = validar(z.object({ texto: z.string().max(20000) }), req.body);
   const bloque = req.params.bloqueId;
   if (!/^[A-Za-z0-9_.-]{1,100}$/.test(bloque)) throw peticionInvalida('El bloque no es válido.');
-  if (texto.trim()) {
-    await db.consulta(
-      `INSERT INTO vto (bloque_id, texto) VALUES ($1, $2)
-       ON CONFLICT (bloque_id) DO UPDATE SET texto = EXCLUDED.texto, actualizado = now()`, [bloque, texto]);
-  } else {
-    await db.consulta('DELETE FROM vto WHERE bloque_id = $1', [bloque]);
-  }
-  res.json({ bloqueId: bloque, texto: texto.trim() ? texto : '' });
+  const nuevo = texto.trim() ? texto : '';
+  await db.transaccion(async (cx) => {
+    if (antes) {
+      /* El bloque puede no existir aún: el cerrojo es por bloque */
+      await db.consulta('SELECT pg_advisory_xact_lock(hashtext($1))', ['vto:' + bloque], cx);
+      const previo = await db.uno('SELECT texto FROM vto WHERE bloque_id = $1', [bloque], cx);
+      concurrencia.comprobarValor(previo ? previo.texto : '', antes.texto, nuevo, 'texto');
+    }
+    if (nuevo) {
+      await db.consulta(
+        `INSERT INTO vto (bloque_id, texto) VALUES ($1, $2)
+         ON CONFLICT (bloque_id) DO UPDATE SET texto = EXCLUDED.texto, actualizado = now()`, [bloque, nuevo], cx);
+    } else {
+      await db.consulta('DELETE FROM vto WHERE bloque_id = $1', [bloque], cx);
+    }
+  });
+  res.json({ bloqueId: bloque, texto: nuevo });
 });
 
 /* ══════════════ Panel y agenda ══════════════ */

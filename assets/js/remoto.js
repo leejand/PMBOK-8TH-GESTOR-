@@ -6,7 +6,8 @@
    · Las peticiones salen en orden, una detrás de otra: crear una
      tarea y moverla al sprint llegan en ese orden.
    · Ediciones seguidas del mismo campo (escribir en un documento)
-     se agrupan en una sola petición mientras no haya salido.
+     se agrupan en una sola petición mientras no haya salido. Su
+     «$antes» (lo que había en el servidor) es el de la primera.
    · Si una falla, se avisa y el gestor recarga el estado real.
    ═══════════════════════════════════════════════════════════ */
 
@@ -16,6 +17,7 @@ window.Remoto = (function () {
   var cola = Promise.resolve();
   var ultima = null;
   var pendientes = 0;
+  var escrituras = 0;
   var alError = null;
   var observadores = [];
 
@@ -30,6 +32,7 @@ window.Remoto = (function () {
   /* Serializa fn() tras lo ya encolado. La promesa devuelta falla si fn falla. */
   function enCola(fn) {
     pendientes++;
+    escrituras++;
     notificar();
     ultima = null;
     var p = cola.then(fn);
@@ -47,11 +50,15 @@ window.Remoto = (function () {
      Nunca rechaza: los errores van a alError. */
   function enviar(opc) {
     if (opc.clave && ultima && ultima.clave === opc.clave && !ultima.iniciada) {
+      escrituras++;
+      var antesPrevio = ultima.cuerpo && ultima.cuerpo.$antes;
       if (opc.fusion === 'mezclar') {
-        Object.keys(opc.cuerpo || {}).forEach(function (k) { ultima.cuerpo[k] = opc.cuerpo[k]; });
+        Object.keys(opc.cuerpo || {}).forEach(function (k) { if (k !== '$antes') ultima.cuerpo[k] = opc.cuerpo[k]; });
       } else {
-        ultima.cuerpo = opc.cuerpo;
+        ultima.cuerpo = copiar(opc.cuerpo);
       }
+      var antesNuevo = opc.cuerpo && opc.cuerpo.$antes;
+      if (antesPrevio || antesNuevo) ultima.cuerpo.$antes = combinarAntes(antesPrevio, antesNuevo);
       if (opc.despues) ultima.despues = opc.despues;
       if (opc.descripcion) ultima.descripcion = opc.descripcion;
       return ultima.promesa;
@@ -88,6 +95,14 @@ window.Remoto = (function () {
     return r;
   }
 
+  /* Del valor previo de cada campo manda el de la primera edición agrupada */
+  function combinarAntes(previo, nuevo) {
+    var r = {};
+    Object.keys(nuevo || {}).forEach(function (k) { r[k] = nuevo[k]; });
+    Object.keys(previo || {}).forEach(function (k) { r[k] = previo[k]; });
+    return r;
+  }
+
   /* Se resuelve cuando no queda nada por enviar */
   function esperar() {
     if (!pendientes) return Promise.resolve();
@@ -114,6 +129,8 @@ window.Remoto = (function () {
     enCola: enCola,
     esperar: esperar,
     pendientes: function () { return pendientes; },
+    /* Cuántas escrituras se han pedido desde que cargó la página */
+    escrituras: function () { return escrituras; },
     alError: function (fn) { alError = fn; },
     alCambiarEstado: function (fn) { observadores.push(fn); }
   };

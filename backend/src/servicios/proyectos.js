@@ -12,6 +12,7 @@ const db = require('../db');
 const repo = require('../repositorio');
 const catalogo = require('../catalogo');
 const D = require('../definiciones');
+const concurrencia = require('../concurrencia');
 const { peticionInvalida, noEncontrado } = require('../errores');
 
 function nuevoId(prefijo) {
@@ -73,8 +74,9 @@ async function crear(usuario, datos) {
   });
 }
 
-async function actualizar(proyectoId, cambios) {
+async function actualizar(proyectoId, cambios, antes) {
   return db.transaccion(async (cx) => {
+    await concurrencia.comprobar(D.proyectos, proyectoId, cambios, antes, cx);
     const actual = await repo.obtener(D.proyectos, proyectoId, cx);
     if (!actual) throw noEncontrado('No existe el proyecto.');
     const datos = { ...cambios };
@@ -142,8 +144,22 @@ function exigirProceso(procesoId) {
   return f;
 }
 
-async function fijarEstadoProceso(proyectoId, procesoId, { estado, notas }) {
+async function fijarEstadoProceso(proyectoId, procesoId, { estado, notas }, antes) {
   exigirProceso(procesoId);
+  return db.transaccion(async (cx) => {
+    if (antes) {
+      /* El proyecto hace de cerrojo: la fila del proceso puede no existir aún */
+      await db.uno('SELECT id FROM proyectos WHERE id = $1 FOR UPDATE', [proyectoId], cx);
+      const previo = await db.uno('SELECT estado, notas FROM proyecto_procesos WHERE proyecto_id = $1 AND proceso_id = $2',
+        [proyectoId, procesoId], cx) || { estado: 'pendiente', notas: '' };
+      if (estado !== undefined) concurrencia.comprobarValor(previo.estado, antes.estado, estado, 'estado');
+      if (notas !== undefined) concurrencia.comprobarValor(previo.notas, antes.notas, notas, 'notas');
+    }
+    return guardarEstadoProceso(proyectoId, procesoId, estado, notas, cx);
+  });
+}
+
+async function guardarEstadoProceso(proyectoId, procesoId, estado, notas, cx) {
   const fila = await db.uno(
     `INSERT INTO proyecto_procesos (proyecto_id, proceso_id, estado, notas, fecha)
      VALUES ($1, $2, COALESCE($3::text, 'pendiente'), COALESCE($4::text, ''),
@@ -153,7 +169,7 @@ async function fijarEstadoProceso(proyectoId, procesoId, { estado, notas }) {
        notas  = COALESCE($4::text, proyecto_procesos.notas),
        fecha  = CASE WHEN $3::text IS NOT NULL THEN now() ELSE proyecto_procesos.fecha END
      RETURNING *`,
-    [proyectoId, procesoId, estado === undefined ? null : estado, notas === undefined ? null : notas]);
+    [proyectoId, procesoId, estado === undefined ? null : estado, notas === undefined ? null : notas], cx);
   return {
     proyectoId, procesoId, estado: fila.estado, notas: fila.notas,
     fecha: fila.fecha ? fila.fecha.getTime() : null,

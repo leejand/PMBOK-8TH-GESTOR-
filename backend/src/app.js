@@ -15,6 +15,7 @@ const config = require('./config');
 const db = require('./db');
 const catalogo = require('./catalogo');
 const errores = require('./errores');
+const cambios = require('./cambios');
 const { requerirSesion } = require('./middleware/auth');
 const rutasAuth = require('./rutas/auth');
 const { usuarios, permisos } = require('./rutas/usuarios');
@@ -39,11 +40,13 @@ function crearApp() {
     origin: (origen, cb) => cb(null, !origen || config.corsOrigenes.includes(origen)),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['X-Marca', 'X-Marca-Anterior'],
     maxAge: 600
   }));
   app.use('/api/datos/importar', express.json({ limit: '50mb' }));
   app.use('/api', express.json({ limit: '5mb' }));
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+  app.use('/api', cambios.registrar);
 
   /* ── Públicas ── */
   app.get('/api/salud', async (_req, res) => {
@@ -68,6 +71,7 @@ function crearApp() {
 
   /* ── Con sesión ── */
   app.use('/api', requerirSesion);
+  app.get('/api/cambios', (_req, res) => res.json({ marca: cambios.marca() }));
   app.use('/api/usuarios', usuarios);
   app.use('/api/permisos', permisos);
   app.use('/api/proyectos', proyectos);

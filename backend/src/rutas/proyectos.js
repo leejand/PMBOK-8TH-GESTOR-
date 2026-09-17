@@ -15,6 +15,7 @@ const trabajo = require('../servicios/trabajo');
 const docs = require('../servicios/documentos');
 const alcance = require('../servicios/alcance');
 const catalogo = require('../catalogo');
+const concurrencia = require('../concurrencia');
 const { z, validar, limpiar, id: esquemaId } = require('../validacion');
 const { exigirProyecto, requerirGestion } = require('../middleware/auth');
 const { recursoDeProyecto, proyectoDeRegistro } = require('./recursos');
@@ -48,10 +49,11 @@ r.get(P, async (req, res) => {
 
 r.patch(P, async (req, res) => {
   const pid = req.params.proyectoId;
+  const antes = concurrencia.extraerAntes(req.body);
   const cambios = limpiar(validar(D.proyectos.esquemas.actualizar, req.body));
   const soloEdicion = Object.keys(cambios).every((k) => D.proyectos.camposDeEdicion.includes(k));
   const nivel = await exigirProyecto(req.usuario, pid, soloEdicion ? 'editar' : 'dirigir');
-  const p = await svc.actualizar(pid, cambios);
+  const p = await svc.actualizar(pid, cambios, antes);
   res.json({ ...p, nivel, progreso: await svc.progreso(pid) });
 });
 
@@ -97,9 +99,10 @@ const esquemaEstadoProceso = z.object({
 
 r.put(P + '/procesos/:procesoId', async (req, res) => {
   const { proyectoId, procesoId } = req.params;
+  const antes = concurrencia.extraerAntes(req.body);
   await exigirProyecto(req.usuario, proyectoId, 'editar');
   const d = validar(esquemaEstadoProceso, req.body);
-  res.json(await svc.fijarEstadoProceso(proyectoId, procesoId, d));
+  res.json(await svc.fijarEstadoProceso(proyectoId, procesoId, d, antes));
 });
 
 r.put(P + '/procesos/:procesoId/banda', async (req, res) => {
@@ -295,20 +298,25 @@ const esquemaDoc = z.object({
 }).partial();
 
 planas.patch('/documentos/:id', async (req, res) => {
+  const antes = concurrencia.extraerAntes(req.body);
   await proyectoDeRegistro('documentos', req.params.id, req.usuario, 'editar');
   const d = limpiar(validar(esquemaDoc, req.body));
-  if (d.contenido) await repo.actualizar(D.documentos, req.params.id, { contenido: d.contenido });
-  if (d.nombre) await repo.actualizar(D.documentos, req.params.id, { nombre: d.nombre });
-  const doc = d.estado
-    ? await docs.cambiarEstado(req.params.id, d.estado)
-    : docs.enriquecer(await repo.obtener(D.documentos, req.params.id), false);
+  const doc = await db.transaccion(async (cx) => {
+    await concurrencia.comprobar(D.documentos, req.params.id, d, antes, cx);
+    if (d.contenido) await repo.actualizar(D.documentos, req.params.id, { contenido: d.contenido }, cx);
+    if (d.nombre) await repo.actualizar(D.documentos, req.params.id, { nombre: d.nombre }, cx);
+    return d.estado
+      ? docs.cambiarEstado(req.params.id, d.estado, cx)
+      : docs.enriquecer(await repo.obtener(D.documentos, req.params.id, cx), false);
+  });
   res.json(doc);
 });
 
 planas.put('/documentos/:id/bloques/:indice', async (req, res) => {
+  const antes = concurrencia.extraerAntes(req.body);
   await proyectoDeRegistro('documentos', req.params.id, req.usuario, 'editar');
   const cuerpo = validar(z.object({ valor: z.any() }), req.body);
-  res.json(await docs.guardarBloque(req.params.id, req.params.indice, cuerpo.valor));
+  res.json(await docs.guardarBloque(req.params.id, req.params.indice, cuerpo.valor, antes));
 });
 
 /* Historial: abrir una versión guarda la copia de la que se cierra */

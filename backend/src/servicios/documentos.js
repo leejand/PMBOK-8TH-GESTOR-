@@ -8,6 +8,7 @@ const db = require('../db');
 const repo = require('../repositorio');
 const catalogo = require('../catalogo');
 const D = require('../definiciones');
+const concurrencia = require('../concurrencia');
 const { z } = require('../validacion');
 const { peticionInvalida, noEncontrado } = require('../errores');
 
@@ -68,35 +69,43 @@ const celda = z.union([z.string().max(5000), z.number()]).transform(String);
 const valorTabla = z.array(z.array(celda).max(30)).max(500);
 const valorTexto = z.union([z.string().max(50000), z.array(z.string().max(5000)).max(500)]);
 
-/* Guarda un bloque de la plantilla; vacío o null lo borra */
-async function guardarBloque(documentoId, indice, valor) {
-  const doc = await repo.obtener(D.documentos, documentoId);
-  if (!doc) throw noEncontrado('No existe el documento.');
-  const art = artefacto(doc.artefactoId);
-  const n = Number(indice);
-  if (!Number.isInteger(n) || n < 0 || !art || n >= art.plantilla.length) {
-    throw peticionInvalida('El bloque ' + indice + ' no existe en la plantilla (0 a ' + ((art ? art.plantilla.length : 1) - 1) + ').');
-  }
-  const bloque = art.plantilla[n];
+/* Guarda un bloque de la plantilla; vacío o null lo borra.
+   antes: { valor } que la interfaz tenía de ese bloque (opcional). */
+async function guardarBloque(documentoId, indice, valor, antes) {
+  return db.transaccion(async (cx) => {
+    const fila = await db.uno('SELECT id FROM documentos WHERE id = $1 FOR UPDATE', [documentoId], cx);
+    if (!fila) throw noEncontrado('No existe el documento.');
+    const doc = await repo.obtener(D.documentos, documentoId, cx);
+    const art = artefacto(doc.artefactoId);
+    const n = Number(indice);
+    if (!Number.isInteger(n) || n < 0 || !art || n >= art.plantilla.length) {
+      throw peticionInvalida('El bloque ' + indice + ' no existe en la plantilla (0 a ' + ((art ? art.plantilla.length : 1) - 1) + ').');
+    }
+    const bloque = art.plantilla[n];
+    const vacio = valor === null || valor === undefined || valor === '';
+    const limpio = vacio ? null : bloque.t === 'tabla' ? valorTabla.parse(valor) : valorTexto.parse(valor);
+    if (antes && Object.prototype.hasOwnProperty.call(antes, 'valor')) {
+      concurrencia.comprobarValor((doc.contenido || {})[n], antes.valor, limpio, 'bloque ' + n);
+    }
 
-  if (valor === null || valor === undefined || valor === '') {
-    await db.consulta('UPDATE documentos SET contenido = contenido - $2 WHERE id = $1', [documentoId, String(n)]);
-  } else {
-    const limpio = bloque.t === 'tabla' ? valorTabla.parse(valor) : valorTexto.parse(valor);
-    await db.consulta(
-      'UPDATE documentos SET contenido = jsonb_set(contenido, ARRAY[$2], $3::jsonb) WHERE id = $1',
-      [documentoId, String(n), JSON.stringify(limpio)]);
-  }
-  return enriquecer(await repo.obtener(D.documentos, documentoId), false);
+    if (vacio) {
+      await db.consulta('UPDATE documentos SET contenido = contenido - $2 WHERE id = $1', [documentoId, String(n)], cx);
+    } else {
+      await db.consulta(
+        'UPDATE documentos SET contenido = jsonb_set(contenido, ARRAY[$2], $3::jsonb) WHERE id = $1',
+        [documentoId, String(n), JSON.stringify(limpio)], cx);
+    }
+    return enriquecer(await repo.obtener(D.documentos, documentoId, cx), false);
+  });
 }
 
-async function cambiarEstado(documentoId, estado) {
+async function cambiarEstado(documentoId, estado, cx) {
   const fila = await db.uno(
     `UPDATE documentos SET estado = $2,
        aprobado = CASE WHEN $2 = 'aprobado' THEN now() ELSE aprobado END
-     WHERE id = $1 RETURNING id`, [documentoId, estado]);
+     WHERE id = $1 RETURNING id`, [documentoId, estado], cx);
   if (!fila) throw noEncontrado('No existe el documento.');
-  return enriquecer(await repo.obtener(D.documentos, documentoId), false);
+  return enriquecer(await repo.obtener(D.documentos, documentoId, cx), false);
 }
 
 /* Cierra la versión actual guardando su copia y abre la siguiente como

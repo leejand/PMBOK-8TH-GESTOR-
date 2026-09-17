@@ -329,6 +329,16 @@
     });
   }
 
+  /* Cambios de otras personas recién cargados */
+  function pintarRefresco() {
+    var el = document.getElementById('estado-sincro');
+    if (!el) return;
+    clearTimeout(temporizadorSincro);
+    el.textContent = 'Actualizado con cambios del equipo';
+    el.className = 'g-sincro hecho';
+    temporizadorSincro = setTimeout(function () { el.className = 'g-sincro'; el.textContent = ''; }, 2600);
+  }
+
   /* «Guardando…» mientras quedan cambios camino del servidor */
   var temporizadorSincro = null;
   function pintarSincro(pendientes) {
@@ -386,6 +396,7 @@
     /* Con backend, primero se detecta el servidor y se carga lo visible */
     contenido.innerHTML = '<div class="hoja"><p class="g-cargando">Cargando…</p></div>';
     Gestor.alCambiar(resolver);
+    Gestor.alRefrescar(pintarRefresco);
     if (window.Remoto) Remoto.alCambiarEstado(pintarSincro);
     Gestor.iniciar().then(function (modo) {
       document.documentElement.setAttribute('data-modo', modo);

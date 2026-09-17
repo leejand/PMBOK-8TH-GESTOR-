@@ -14,6 +14,7 @@ window.Api = (function () {
   var disponible = false;
   var salud = null;
   var alCaducar = null;
+  var alMarca = null;
 
   function token() {
     try { return localStorage.getItem(CLAVE_TOKEN); } catch (e) { return null; }
@@ -68,6 +69,9 @@ window.Api = (function () {
     }
 
     return fetch('api' + ruta, peticion).then(function (r) {
+      /* Marca de cambios: permite saber si otra persona escribió entretanto */
+      var marca = r.headers.get('X-Marca');
+      if (marca && alMarca) alMarca(r.headers.get('X-Marca-Anterior'), marca);
       if (r.status === 204) return null;
       var tipo = r.headers.get('content-type') || '';
       var lectura = tipo.indexOf('application/json') !== -1 ? r.json() : r.blob();
@@ -97,6 +101,7 @@ window.Api = (function () {
     token: token,
     fijarToken: fijarToken,
     alCaducar: function (fn) { alCaducar = fn; },
+    alMarca: function (fn) { alMarca = fn; },
     c: codificar
   };
 })();

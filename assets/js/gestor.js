@@ -116,6 +116,9 @@ window.Gestor = (function () {
     ['programas', 'documentos', 'archivos', 'usuarios', 'permisos', 'proyectos']);
   /* Campos calculados que la API añade a sus respuestas y no se guardan */
   var CALCULADOS = ['severidad', 'sprintCerrado', 'progreso', 'siguiente', 'completitud', 'plantilla', 'versionGuardada'];
+  /* La verificación de calidad se edita sobre su propio objeto (proyecto.js):
+     la respuesta del servidor no la sustituye */
+  var NO_ADOPTAR = ['calidad'];
 
   function iniciar() {
     if (!window.Api) return Promise.resolve('local');
@@ -124,6 +127,11 @@ window.Gestor = (function () {
       modo = 'servidor';
       bd = vacia();
       Remoto.alError(errorRemoto);
+      Api.alMarca(marcaRecibida);
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) programarRefresco(400);
+      });
+      programarRefresco();
       var listo = Api.token()
         ? hidratarOClavePendiente().catch(function () { olvidarSesion(); })
         : Promise.resolve();
@@ -136,14 +144,103 @@ window.Gestor = (function () {
 
   function hidratar() {
     return Api.pedir('GET', '/estado', undefined, { silencioso: true }).then(function (s) {
-      var nueva = vacia();
-      COLECCIONES.forEach(function (c) { nueva[c] = Array.isArray(s[c]) ? s[c] : []; });
-      nueva.vto = s.vto || {};
-      nueva.sesion = { usuarioId: s.usuario.id, desde: ahora() };
-      bd = nueva;
-      clavePendiente = false;
+      aplicarEstado(s);
       return s;
     });
+  }
+
+  function aplicarEstado(s) {
+    var nueva = vacia();
+    COLECCIONES.forEach(function (c) { nueva[c] = Array.isArray(s[c]) ? s[c] : []; });
+    nueva.vto = s.vto || {};
+    nueva.sesion = { usuarioId: s.usuario.id, desde: ahora() };
+    bd = nueva;
+    clavePendiente = false;
+    marcaConocida = s.marca || null;
+  }
+
+  /* ══════════════ Modo servidor: cambios de otras personas ══════════════ */
+
+  /* Cada pocos segundos se pregunta por la marca de cambios del servidor.
+     Si no es la conocida, se recarga lo visible y se repinta, salvo que
+     la persona esté escribiendo, tenga un diálogo abierto o queden
+     escrituras suyas en camino: entonces se espera a la siguiente vuelta. */
+  var marcaConocida = null;
+  var intervaloRefresco = 12000;
+  var temporizadorRefresco = null;
+  var consultando = false;
+  var alRefrescar = function () {};
+
+  function marcaRecibida(anterior, nueva) {
+    /* Si antes de mi escritura estaba en la que conocía, el cambio fue solo mío */
+    if (anterior && anterior === marcaConocida) marcaConocida = nueva;
+  }
+
+  function programarRefresco(ms) {
+    clearTimeout(temporizadorRefresco);
+    if (!enServidor()) return;
+    temporizadorRefresco = setTimeout(comprobarCambios, ms === undefined ? intervaloRefresco : ms);
+  }
+
+  function editando() {
+    var a = document.activeElement;
+    if (!a || a === document.body) return false;
+    return a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable;
+  }
+
+  /* Un formulario con algo escrito y sin guardar se perdería al repintar.
+     Los campos que se guardan solos (bloques de documento, verificación de
+     calidad, VTO, scorecard) no cuentan. */
+  var AUTOGUARDADOS = '.g-bloque, .pa-entrada[data-s], [data-vto], [data-metrica]';
+  function formularioSinGuardar() {
+    var campos = document.querySelectorAll('#contenido input, #contenido textarea, #contenido select');
+    for (var i = 0; i < campos.length; i++) {
+      var c = campos[i];
+      if (c.disabled || c.readOnly || c.type === 'hidden' || c.type === 'file' || c.matches(AUTOGUARDADOS)) continue;
+      if (c.tagName === 'SELECT') {
+        /* Sin opción marcada, el navegador muestra la primera */
+        var porDefecto = 0;
+        for (var j = 0; j < c.options.length; j++) {
+          if (c.options[j].defaultSelected) { porDefecto = j; break; }
+        }
+        if (c.options.length && c.selectedIndex !== porDefecto) return true;
+      } else if (c.type === 'checkbox' || c.type === 'radio') {
+        if (c.checked !== c.defaultChecked) return true;
+      } else if (c.value !== c.defaultValue) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function puedeRefrescar() {
+    return haySesion() && !document.hidden && !rehidratando && Remoto.pendientes() === 0 &&
+      !(window.Dialogo && Dialogo.abierto()) && !editando() && !formularioSinGuardar();
+  }
+
+  function comprobarCambios() {
+    if (consultando || !puedeRefrescar()) { programarRefresco(); return; }
+    consultando = true;
+    var escritas = Remoto.escrituras();
+    Api.pedir('GET', '/cambios', undefined, { silencioso: true })
+      .then(function (r) {
+        if (!r || r.marca === marcaConocida) return false;
+        return Api.pedir('GET', '/estado', undefined, { silencioso: true }).then(function (s) {
+          /* Si entretanto la persona escribió o empezó a editar, esta foto ya no sirve */
+          if (Remoto.escrituras() !== escritas || !puedeRefrescar()) return false;
+          aplicarEstado(s);
+          return true;
+        });
+      })
+      .then(function (hubo) {
+        if (!hubo) return;
+        avisarCambio();
+        try { alRefrescar(); } catch (e) { if (window.console) console.error(e); }
+      }, function () { /* sin conexión: se reintenta en la siguiente vuelta */ })
+      .then(function () {
+        consultando = false;
+        programarRefresco();
+      });
   }
 
   /* Una cuenta con la contraseña pendiente de cambio solo puede ver su
@@ -183,8 +280,16 @@ window.Gestor = (function () {
   var rehidratando = null;
   function errorRemoto(err, descripcion) {
     if (err.estado === 401 || err.codigo === 'CLAVE_PENDIENTE') return;
-    if (window.Dialogo) {
-      Dialogo.avisar('No se guardó' + (descripcion ? ' «' + descripcion + '»' : '') + ': ' + err.message, 'error');
+    /* Tras un choque, las escrituras que venían detrás fallan por lo mismo:
+       basta con el primer aviso */
+    var consecuencia = rehidratando && (err.codigo === 'EDICION_CONCURRENTE' || err.estado === 404);
+    if (window.Dialogo && !consecuencia) {
+      if (err.codigo === 'EDICION_CONCURRENTE') {
+        Dialogo.avisar((descripcion ? '«' + descripcion + '»: ' : '') +
+          'otra persona lo cambió mientras editabas. Se muestra su versión; revísala y vuelve a aplicar tu cambio.', 'aviso');
+      } else {
+        Dialogo.avisar('No se guardó' + (descripcion ? ' «' + descripcion + '»' : '') + ': ' + err.message, 'error');
+      }
     }
     /* La copia en memoria ya no coincide con el servidor: se recarga */
     if (rehidratando) return;
@@ -209,7 +314,7 @@ window.Gestor = (function () {
       var obj = uno(coleccion, id);
       if (!obj) return;
       Object.keys(respuesta).forEach(function (k) {
-        if (CALCULADOS.indexOf(k) === -1) obj[k] = respuesta[k];
+        if (CALCULADOS.indexOf(k) === -1 && NO_ADOPTAR.indexOf(k) === -1) obj[k] = respuesta[k];
       });
     };
   }
@@ -234,14 +339,16 @@ window.Gestor = (function () {
     });
   }
 
-  function remotoActualizar(coleccion, id, cambios) {
+  function remotoActualizar(coleccion, id, cambios, antes) {
     var ruta = rutaItem(coleccion, id);
     if (!ruta) {
       if (window.console) console.warn('Gestor: «' + coleccion + '» no se actualiza con la ruta genérica');
       return;
     }
+    var cuerpo = copia(cambios);
+    if (antes) cuerpo.$antes = antes;
     Remoto.enviar({
-      metodo: 'PATCH', ruta: ruta, cuerpo: copia(cambios), clave: 'PATCH ' + ruta, fusion: 'mezclar',
+      metodo: 'PATCH', ruta: ruta, cuerpo: cuerpo, clave: 'PATCH ' + ruta, fusion: 'mezclar',
       descripcion: etiqueta(uno(coleccion, id)), despues: adoptar(coleccion, id)
     });
   }
@@ -303,9 +410,35 @@ window.Gestor = (function () {
     return obj;
   }
 
-  function actualizar(coleccion, id, cambios) {
+  function igualJson(a, b) {
+    return JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+  }
+
+  /* El valor que la interfaz tiene de cada campo antes de cambiarlo */
+  function instantanea(obj, campos) {
+    var r = {};
+    campos.forEach(function (k) { r[k] = obj[k] === undefined ? null : copia(obj[k]); });
+    return r;
+  }
+
+  /* Al servidor solo viajan los campos que cambian, con su valor previo
+     («$antes»), para no pisar lo que otra persona cambió entretanto.
+     opciones.antes: valores previos explícitos, para quien ya modificó el
+     objeto en el sitio (la verificación de calidad); se envía todo lo indicado. */
+  function actualizar(coleccion, id, cambios, opciones) {
+    var previo = uno(coleccion, id);
+    if (!previo) return null;
+    var explicito = opciones && opciones.antes;
+    var campos = Object.keys(cambios || {}).filter(function (k) {
+      return explicito || !igualJson(previo[k], cambios[k]);
+    });
+    var antes = explicito || instantanea(previo, campos);
     var obj = actualizarLocal(coleccion, id, cambios);
-    if (obj && enServidor()) remotoActualizar(coleccion, id, cambios);
+    if (enServidor() && campos.length) {
+      var enviados = {};
+      campos.forEach(function (k) { enviados[k] = cambios[k]; });
+      remotoActualizar(coleccion, id, enviados, antes);
+    }
     return obj;
   }
 
@@ -674,6 +807,7 @@ window.Gestor = (function () {
     var e = lista('procesos', { proyectoId: proyectoId }).filter(function (x) {
       return x.procesoId === procesoId;
     })[0];
+    var previo = { estado: e ? e.estado : 'pendiente', notas: e ? (e.notas || '') : '' };
     var resultadoLocal;
     if (e) {
       resultadoLocal = actualizarLocal('procesos', e.id, cambios);
@@ -683,9 +817,15 @@ window.Gestor = (function () {
       resultadoLocal = crearLocal('procesos', base);
     }
     if (enServidor()) {
-      var cuerpo = {};
-      if (cambios.estado !== undefined) cuerpo.estado = cambios.estado;
-      if (cambios.notas !== undefined) cuerpo.notas = cambios.notas;
+      var cuerpo = { $antes: {} };
+      if (cambios.estado !== undefined) {
+        cuerpo.estado = cambios.estado;
+        cuerpo.$antes.estado = previo.estado;
+      }
+      if (cambios.notas !== undefined) {
+        cuerpo.notas = cambios.notas;
+        cuerpo.$antes.notas = previo.notas;
+      }
       var ruta = '/proyectos/' + Api.c(proyectoId) + '/procesos/' + Api.c(procesoId);
       Remoto.enviar({
         metodo: 'PUT', ruta: ruta, cuerpo: cuerpo, clave: 'PUT ' + ruta, fusion: 'mezclar',
@@ -825,12 +965,14 @@ window.Gestor = (function () {
     var d = uno('documentos', documentoId);
     if (!d) return false;
     if (!d.contenido) d.contenido = {};
+    var anterior = d.contenido[indice] === undefined ? null : copia(d.contenido[indice]);
+    if (igualJson(anterior, valor)) return true;
     d.contenido[indice] = valor;
     actualizarLocal('documentos', documentoId, { contenido: d.contenido });
     if (enServidor()) {
       var ruta = '/documentos/' + Api.c(documentoId) + '/bloques/' + Api.c(indice);
       Remoto.enviar({
-        metodo: 'PUT', ruta: ruta, cuerpo: { valor: valor }, clave: 'PUT ' + ruta,
+        metodo: 'PUT', ruta: ruta, cuerpo: { valor: valor, $antes: { valor: anterior } }, clave: 'PUT ' + ruta,
         descripcion: d.nombre
       });
     }
@@ -842,10 +984,12 @@ window.Gestor = (function () {
     if (!d) return null;
     var cambios = { estado: estado };
     if (estado === 'aprobado') cambios.aprobado = ahora();
+    var estadoPrevio = d.estado;
     var r = actualizarLocal('documentos', documentoId, cambios);
     if (enServidor()) {
       Remoto.enviar({
-        metodo: 'PATCH', ruta: '/documentos/' + Api.c(documentoId), cuerpo: { estado: estado },
+        metodo: 'PATCH', ruta: '/documentos/' + Api.c(documentoId),
+        cuerpo: { estado: estado, $antes: { estado: estadoPrevio } },
         descripcion: d.nombre, despues: adoptar('documentos', documentoId)
       });
     }
@@ -1222,15 +1366,39 @@ window.Gestor = (function () {
   function fijarVto(bloqueId, texto) {
     var b = cargar();
     if (!b.vto) b.vto = {};
-    if ((b.vto[bloqueId] || '') === (texto && texto.trim() ? texto : '')) return true;
+    var anterior = b.vto[bloqueId] || '';
+    if (anterior === (texto && texto.trim() ? texto : '')) return true;
     if (texto && texto.trim()) b.vto[bloqueId] = texto;
     else delete b.vto[bloqueId];
     if (enServidor()) {
       var ruta = '/vto/' + Api.c(bloqueId);
-      Remoto.enviar({ metodo: 'PUT', ruta: ruta, cuerpo: { texto: texto || '' }, clave: 'PUT ' + ruta, descripcion: 'VTO' });
+      Remoto.enviar({
+        metodo: 'PUT', ruta: ruta, cuerpo: { texto: texto || '', $antes: { texto: anterior } },
+        clave: 'PUT ' + ruta, descripcion: 'VTO'
+      });
       return true;
     }
     return guardar();
+  }
+
+  /* Una celda del scorecard; vacía la borra */
+  function fijarValorMetrica(metricaId, semana, valor) {
+    var m = uno('metricas', metricaId);
+    if (!m) return false;
+    var valores = copia(m.valores || {});
+    var anterior = valores[semana] === undefined ? null : valores[semana];
+    var limpio = String(valor == null ? '' : valor).trim();
+    if (igualJson(anterior, limpio || null)) return true;
+    if (limpio) valores[semana] = limpio;
+    else delete valores[semana];
+    if (!enServidor()) return !!actualizar('metricas', metricaId, { valores: valores });
+    actualizarLocal('metricas', metricaId, { valores: valores });
+    var ruta = '/metricas/' + Api.c(metricaId) + '/valores/' + Api.c(semana);
+    Remoto.enviar({
+      metodo: 'PUT', ruta: ruta, cuerpo: { valor: limpio, $antes: { valor: anterior } },
+      clave: 'PUT ' + ruta, descripcion: m.nombre
+    });
+    return true;
   }
 
   function asientosHijos(padreId) {
@@ -1358,6 +1526,9 @@ window.Gestor = (function () {
   return {
     /* modo */
     iniciar: iniciar, enServidor: enServidor, hidratar: hidratar,
+    alRefrescar: function (fn) { alRefrescar = fn || function () {}; },
+    /* Para las pruebas: consultar los cambios con otra cadencia */
+    intervaloRefresco: function (ms) { intervaloRefresco = ms; programarRefresco(ms); },
     clavePendiente: function () { return clavePendiente; },
     alCambiar: function (fn) { alCambiar = fn || function () {}; },
     /* persistencia */
@@ -1400,7 +1571,8 @@ window.Gestor = (function () {
     /* calendario */
     eventosDe: eventosDe,
     /* eos */
-    rocasDe: rocasDe, vto: vto, fijarVto: fijarVto, asientosHijos: asientosHijos,
+    rocasDe: rocasDe, vto: vto, fijarVto: fijarVto, fijarValorMetrica: fijarValorMetrica,
+    asientosHijos: asientosHijos,
     /* datos */
     exportarTodo: exportarTodo, importarTodo: importarTodo,
     datosDelNavegador: datosDelNavegador, llevarNavegadorAlServidor: llevarNavegadorAlServidor

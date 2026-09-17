@@ -12,6 +12,7 @@ const db = require('../db');
 const repo = require('../repositorio');
 const D = require('../definiciones');
 const sesiones = require('../servicios/sesiones');
+const concurrencia = require('../concurrencia');
 const { z, validar, limpiar } = require('../validacion');
 const { requerirRol } = require('../middleware/auth');
 const { noEncontrado, peticionInvalida, conflicto } = require('../errores');
@@ -60,6 +61,7 @@ async function quedariaSinAdmin(usuarioId, cx) {
 }
 
 usuarios.patch('/:id', soloAdmin, async (req, res) => {
+  const antes = concurrencia.extraerAntes(req.body);
   const cambios = limpiar(validar(D.usuarios.esquemas.actualizar, req.body));
   const id = req.params.id;
   const u = await db.transaccion(async (cx) => {
@@ -73,6 +75,7 @@ usuarios.patch('/:id', soloAdmin, async (req, res) => {
     if (pierdeAdmin && await quedariaSinAdmin(id, cx)) {
       throw conflicto('Debe quedar al menos un administrador activo.');
     }
+    await concurrencia.comprobar(D.usuarios, id, cambios, antes, cx);
     await repo.actualizar(D.usuarios, id, cambios, cx);
     if (cambios.activo === false) await sesiones.revocarDe(id, null, cx);
     return repo.obtener(D.usuarios, id, cx);

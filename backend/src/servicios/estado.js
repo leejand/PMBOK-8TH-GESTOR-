@@ -18,6 +18,7 @@ const db = require('../db');
 const repo = require('../repositorio');
 const D = require('../definiciones');
 const alcance = require('./alcance');
+const cambios = require('../cambios');
 
 const DE_PROYECTO = [
   ['miembros', D.miembros], ['procesos', D.procesosProyecto], ['documentos', D.documentos],
@@ -32,6 +33,9 @@ const GLOBALES = [
 ];
 
 async function estado(usuario) {
+  /* Se toma antes de leer: un cambio que llegue durante la lectura
+     hará que la interfaz vuelva a cargar, nunca que se lo pierda */
+  const marca = cambios.marca();
   const filas = await db.varios(
     `SELECT t.*, n.nivel FROM proyectos t
      CROSS JOIN LATERAL (SELECT nivel_en(t.id, $1) AS nivel) n
@@ -47,6 +51,7 @@ async function estado(usuario) {
     version: 1,
     formato: 'pmbok8-gestor',
     generado: Date.now(),
+    marca,
     sesion: { usuarioId: usuario.id },
     usuario,
     proyectos

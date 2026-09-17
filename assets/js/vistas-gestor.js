@@ -973,13 +973,7 @@ window.VistasGestor = (function () {
     var celdas = document.querySelectorAll('[data-metrica]');
     for (var i = 0; i < celdas.length; i++) {
       celdas[i].addEventListener('change', function () {
-        var m = Gestor.uno('metricas', this.getAttribute('data-metrica'));
-        if (!m) return;
-        if (!m.valores) m.valores = {};
-        var s = this.getAttribute('data-semana');
-        if (String(this.value).trim()) m.valores[s] = this.value.trim();
-        else delete m.valores[s];
-        Gestor.actualizar('metricas', m.id, { valores: m.valores });
+        Gestor.fijarValorMetrica(this.getAttribute('data-metrica'), this.getAttribute('data-semana'), this.value);
         recargarDiferido();
       });
     }
@@ -1196,8 +1190,10 @@ window.VistasGestor = (function () {
         var roca = Gestor.uno('rocas', id);
         var i = parseInt(el.getAttribute('data-i'), 10);
         if (roca && roca.metas && roca.metas[i]) {
-          roca.metas[i].hecho = !roca.metas[i].hecho;
-          Gestor.actualizar('rocas', id, { metas: roca.metas });
+          var metas = roca.metas.map(function (m, n) {
+            return n === i ? { texto: m.texto, hecho: !m.hecho } : { texto: m.texto, hecho: !!m.hecho };
+          });
+          Gestor.actualizar('rocas', id, { metas: metas });
           recargar();
         }
         break;

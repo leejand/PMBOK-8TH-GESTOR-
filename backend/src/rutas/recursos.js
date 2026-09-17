@@ -15,6 +15,7 @@ const db = require('../db');
 const repo = require('../repositorio');
 const D = require('../definiciones');
 const alcance = require('../servicios/alcance');
+const concurrencia = require('../concurrencia');
 const { validar, limpiar } = require('../validacion');
 const { exigirProyecto, requerirGestion, faltaNivel } = require('../middleware/auth');
 const { noEncontrado } = require('../errores');
@@ -110,9 +111,11 @@ function recursoDeProyecto(def, ganchos = {}) {
   });
 
   item.patch('/:id', async (req, res) => {
+    const antes = concurrencia.extraerAntes(req.body);
     const r = await paraEscribir(req, 'PATCH');
     const cambios = limpiar(validar(def.esquemas.actualizar, req.body));
     const actualizado = await db.transaccion(async (cx) => {
+      await concurrencia.comprobar(def, req.params.id, cambios, antes, cx);
       if (ganchos.antesDeActualizar) await ganchos.antesDeActualizar(req, r, cambios, cx);
       await repo.actualizar(def, req.params.id, cambios, cx);
       if (ganchos.despues) await ganchos.despues(r.proyectoId, cx);
@@ -165,10 +168,12 @@ function recursoGlobal(def, ganchos = {}) {
   });
 
   r.patch('/:id', requerirGestion, async (req, res) => {
+    const antes = concurrencia.extraerAntes(req.body);
     const cambios = limpiar(validar(def.esquemas.actualizar, req.body));
     const o = await db.transaccion(async (cx) => {
       const existe = await db.uno('SELECT id FROM ' + def.tabla + ' WHERE id = $1 FOR UPDATE', [req.params.id], cx);
       if (!existe) throw noEncontrado();
+      await concurrencia.comprobar(def, req.params.id, cambios, antes, cx);
       if (ganchos.antesDeGuardar) await ganchos.antesDeGuardar(req, cambios, req.params.id, cx);
       await repo.actualizar(def, req.params.id, cambios, cx);
       if (ganchos.despuesDeGuardar) await ganchos.despuesDeGuardar(req, req.params.id, cambios, cx);

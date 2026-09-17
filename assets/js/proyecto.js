@@ -15,6 +15,7 @@ window.Proyecto = (function () {
   var estado = null;             // caché en memoria
   var sugerencias = null;        // caché del análisis del documento
   var activoId = null;           // proyecto del gestor al que pertenece
+  var base = null;               // última versión sincronizada, para detectar ediciones ajenas
 
   /* La verificación de calidad vive en el registro del proyecto del gestor
      que está abierto. Sin proyecto activo se trabaja en memoria: es el caso
@@ -42,21 +43,27 @@ window.Proyecto = (function () {
   }
 
   function cargar() {
+    var reg = (activoId && window.Gestor) ? Gestor.proyecto(activoId) : null;
+    /* Tras recargar lo del servidor, el proyecto trae su verificación en un objeto nuevo */
+    if (estado && reg && reg.calidad && reg.calidad !== estado) estado = null;
     if (!estado) {
-      var reg = (activoId && window.Gestor) ? Gestor.proyecto(activoId) : null;
       estado = (reg && reg.calidad) || vacioEstado();
       if (!estado.campos) estado.campos = {};
       if (!estado.procesos) estado.procesos = {};
       if (!estado.historial) estado.historial = [];
+      base = reg && reg.calidad ? JSON.parse(JSON.stringify(reg.calidad)) : null;
     }
     return estado;
   }
 
+  /* La verificación se edita sobre su objeto: se envía con la versión
+     sincronizada anterior para que no pise lo que otra persona guardó */
   function guardar() {
     var p = cargar();
     p.actualizado = Date.now();
     if (activoId && window.Gestor) {
-      Gestor.actualizar('proyectos', activoId, { calidad: p });
+      Gestor.actualizar('proyectos', activoId, { calidad: p }, { antes: { calidad: base } });
+      base = JSON.parse(JSON.stringify(p));
     }
     return true;
   }
