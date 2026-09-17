@@ -479,7 +479,7 @@ window.ObraAcciones = (function () {
         if (!titulo.trim()) return;
         Gestor.crear('tareas', {
           proyectoId: proyectoId, titulo: titulo.trim(),
-          puntos: valor('nt-puntos') ? Number(valor('nt-puntos')) : null,
+          puntos: valor('nt-puntos') ? UI.numeroDe('nt-puntos', null) : null,
           fechaLimite: valor('nt-fecha') || null,
           responsableId: valor('nt-responsable') || null,
           criterios: valor('nt-criterios'),
@@ -536,7 +536,7 @@ window.ObraAcciones = (function () {
         if (!tr.trim()) return;
         Gestor.crear('riesgos', {
           proyectoId: proyectoId, titulo: tr.trim(),
-          p: Number(valor('nr2-p')) || 3, i: Number(valor('nr2-i')) || 3,
+          p: UI.numeroDe('nr2-p', 3), i: UI.numeroDe('nr2-i', 3),
           estrategia: valor('nr2-estrategia'), respuesta: valor('nr2-respuesta'),
           responsableId: valor('nr2-responsable') || null, estado: 'activo'
         });
@@ -553,7 +553,7 @@ window.ObraAcciones = (function () {
         if (!ni.trim()) return;
         Gestor.crear('interesados', {
           proyectoId: proyectoId, nombre: ni.trim(), rol: valor('ni-rol'),
-          poder: Number(valor('ni-poder')) || 3, influencia: Number(valor('ni-influencia')) || 3,
+          poder: UI.numeroDe('ni-poder', 3), influencia: UI.numeroDe('ni-influencia', 3),
           actual: valor('ni-actual'), deseado: valor('ni-deseado'), estrategia: valor('ni-estrategia')
         });
         recargar();
@@ -601,8 +601,8 @@ window.ObraAcciones = (function () {
         }
         Gestor.crear('mediciones', {
           proyectoId: proyectoId, fecha: valor('nm2-fecha'),
-          pv: Number(valor('nm2-pv')) || 0, ev: Number(valor('nm2-ev')) || 0,
-          ac: Number(valor('nm2-ac')) || 0, nota: valor('nm2-nota')
+          pv: UI.numeroDe('nm2-pv', 0), ev: UI.numeroDe('nm2-ev', 0),
+          ac: UI.numeroDe('nm2-ac', 0), nota: valor('nm2-nota')
         });
         recargar();
         Dialogo.avisar('Medición registrada');
@@ -671,11 +671,11 @@ window.ObraAcciones = (function () {
           estado: valor('cp-estado'),
           inicio: valor('cp-inicio') || null,
           fin: valor('cp-fin') || null,
-          presupuesto: valor('cp-presupuesto') ? Number(valor('cp-presupuesto')) : null,
+          presupuesto: valor('cp-presupuesto') ? UI.numeroDe('cp-presupuesto', null) : null,
           moneda: valor('cp-moneda') || 'USD',
           portafolioId: valor('cp-portafolio') || null,
           rocaId: valor('cp-roca') || null,
-          wip: Number(valor('cp-wip')) || 3
+          wip: UI.numeroDe('cp-wip', 3)
         };
         if (metNueva && metNueva !== actualP.metodologia) {
           cambios.metodologia = metNueva;

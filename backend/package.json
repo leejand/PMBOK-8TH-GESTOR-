@@ -14,7 +14,7 @@
     "db:migrar": "node db/migrar.js",
     "db:semilla": "node db/semilla.js",
     "db:reiniciar": "node db/migrar.js --reiniciar && node db/semilla.js",
-    "test": "node --test --test-concurrency=1 --test-reporter=spec \"tests/aceptacion/*.test.js\"",
+    "test": "node --test --test-concurrency=1 --test-reporter=spec tests/aceptacion",
     "bd:iniciar": "scripts\\postgres.cmd iniciar",
     "bd:detener": "scripts\\postgres.cmd detener",
     "bd:estado": "scripts\\postgres.cmd estado",

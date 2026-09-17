@@ -194,11 +194,25 @@ window.UI = (function () {
     return e ? e.value : '';
   }
 
+  /* Lee un campo numérico dentro del «min», el «max» y el «step» que él mismo
+     declara. Sin esto, el navegador guardaría en modo local escalas y montos
+     que el servidor rechaza, y esos datos ya no podrían llevarse al servidor. */
+  function numeroDe(id, porDefecto) {
+    var e = document.getElementById(id);
+    if (!e) return porDefecto;
+    var n = Number(e.value);
+    if (e.value === '' || !isFinite(n)) return porDefecto;
+    if (e.step && e.step !== 'any') n = Math.round(n);
+    if (e.min !== '') n = Math.max(Number(e.min), n);
+    if (e.max !== '') n = Math.min(Number(e.max), n);
+    return n;
+  }
+
   return {
     etiqueta: etiqueta, texto: texto, area: area, selector: selector, fila: fila,
     opciones: opciones, anillo: anillo, barra: barra, colorPorcentaje: colorPorcentaje,
     cifra: cifra, tablaEditable: tablaEditable, leerTabla: leerTabla,
     vacio: vacio, pastilla: pastilla, fecha: fecha, hoyISO: hoyISO, dinero: dinero,
-    iniciales: iniciales, avatar: avatar, valorDe: valorDe
+    iniciales: iniciales, avatar: avatar, valorDe: valorDe, numeroDe: numeroDe
   };
 })();

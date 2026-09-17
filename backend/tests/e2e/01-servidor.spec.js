@@ -215,6 +215,41 @@ test('una cuenta creada desde Administración ve solo lo permitido y según su r
   await otra.close();
 });
 
+test('un número fuera de rango se ajusta antes de salir del navegador', async ({ page, request }) => {
+  await entrarComoAdmin(page, request);
+  const rechazos = [];
+  page.on('response', (r) => {
+    if (r.status() === 400 && r.request().method() === 'POST') rechazos.push(r.url());
+  });
+
+  await page.goto('/#/proyectos/' + pid + '/dominios/riesgos');
+  await page.fill('#nr2-titulo', 'Riesgo fuera de escala');
+  await page.fill('#nr2-p', '9');
+  await page.fill('#nr2-i', '0');
+  await page.click('[data-o="crear-riesgo"]');
+  await esperarGuardado(page);
+
+  const riesgo = (await api(page, 'GET', '/proyectos/' + pid + '/riesgos')).datos
+    .find((r) => r.titulo === 'Riesgo fuera de escala');
+  expect(riesgo).toBeTruthy();
+  expect([riesgo.p, riesgo.i]).toEqual([5, 1]);
+
+  await page.goto('/#/proyectos/' + pid + '/control');
+  await page.fill('#nm2-fecha', '2026-10-31');
+  await page.fill('#nm2-pv', '-500');
+  await page.fill('#nm2-ev', '1000');
+  await page.fill('#nm2-ac', '-1');
+  await page.click('[data-o="crear-medicion"]');
+  await esperarGuardado(page);
+
+  const corte = (await api(page, 'GET', '/proyectos/' + pid + '/mediciones')).datos
+    .find((m) => m.fecha === '2026-10-31');
+  expect([corte.pv, corte.ev, corte.ac]).toEqual([0, 1000, 0]);
+
+  /* Lo que la interfaz envía nunca debería volver rechazado */
+  expect(rechazos).toEqual([]);
+});
+
 test('cerrar sesión devuelve al acceso y olvida el token', async ({ page, request }) => {
   await entrarComoAdmin(page, request);
   await page.click('#btn-salir');

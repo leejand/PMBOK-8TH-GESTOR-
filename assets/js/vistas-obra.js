@@ -872,8 +872,8 @@ window.VistasObra = (function () {
         ? '<div class="pa-panel">' +
           UI.texto('nr2-titulo', 'Riesgo', '', { placeholder: 'Debido a [causa], podría [evento], provocando [efecto]' }) +
           UI.fila([
-            UI.texto('nr2-p', 'Probabilidad (1-5)', '3', { tipo: 'number', min: 1, max: 5 }),
-            UI.texto('nr2-i', 'Impacto (1-5)', '3', { tipo: 'number', min: 1, max: 5 }),
+            UI.texto('nr2-p', 'Probabilidad (1-5)', '3', { tipo: 'number', min: 1, max: 5, paso: 1 }),
+            UI.texto('nr2-i', 'Impacto (1-5)', '3', { tipo: 'number', min: 1, max: 5, paso: 1 }),
             UI.selector('nr2-estrategia', 'Estrategia', [
               { id: 'mitigar', nombre: 'Mitigar' }, { id: 'evitar', nombre: 'Evitar' },
               { id: 'transferir', nombre: 'Transferir' }, { id: 'aceptar', nombre: 'Aceptar' },
@@ -955,8 +955,8 @@ window.VistasObra = (function () {
             UI.texto('ni-rol', 'Rol', '', { placeholder: 'Patrocinador, usuario, regulador…' })
           ]) +
           UI.fila([
-            UI.texto('ni-poder', 'Poder (1-5)', '3', { tipo: 'number', min: 1, max: 5 }),
-            UI.texto('ni-influencia', 'Influencia (1-5)', '3', { tipo: 'number', min: 1, max: 5 }),
+            UI.texto('ni-poder', 'Poder (1-5)', '3', { tipo: 'number', min: 1, max: 5, paso: 1 }),
+            UI.texto('ni-influencia', 'Influencia (1-5)', '3', { tipo: 'number', min: 1, max: 5, paso: 1 }),
             UI.selector('ni-actual', 'Nivel actual', niveles, 'neutral'),
             UI.selector('ni-deseado', 'Nivel deseado', niveles, 'partidario')
           ]) +
@@ -1268,7 +1268,7 @@ window.VistasObra = (function () {
             UI.selector('cp-roca', 'Roca de gerencia',
               [{ id: '', nombre: '— Sin roca —' }].concat(Gestor.lista('rocas').map(function (r) {
                 return { id: r.id, nombre: r.trimestre + ' · ' + r.titulo }; })), p.rocaId || ''),
-            UI.texto('cp-wip', 'Límite de WIP', p.wip || 3, { tipo: 'number', min: 1 })
+            UI.texto('cp-wip', 'Límite de WIP', p.wip || 3, { tipo: 'number', min: 1, paso: 1 })
           ]) +
           '<div class="g-campo"><label class="g-etiqueta">Metodología (adaptación)' +
           '<span>Cambiarla reordena el flujo y ajusta qué procesos son iterativos</span></label>' +

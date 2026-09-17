@@ -1187,7 +1187,7 @@ window.VistasGestor = (function () {
           rocaId: UI.valorDe('np-roca') || null,
           inicio: UI.valorDe('np-inicio'),
           fin: UI.valorDe('np-fin'),
-          presupuesto: UI.valorDe('np-presupuesto')
+          presupuesto: UI.numeroDe('np-presupuesto', null)
         });
         Promise.resolve(pendiente).then(function (r) {
           ocupado('[data-g="crear-proyecto"]', false);
