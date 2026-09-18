@@ -27,6 +27,7 @@ const conflicto = (msg) => new ErrorHttp(409, msg, 'CONFLICTO');
 const RESTRICCIONES = {
   usuarios_correo_uk: [409, 'Ya existe una cuenta con ese correo.'],
   miembros_proyecto_usuario_uk: [409, 'Ese usuario ya es miembro del proyecto.'],
+  invitaciones_codigo_uk: [409, 'Ese código de invitación ya existe.'],
   documentos_proyecto_artefacto_uk: [409, 'Ese documento ya existe en el proyecto.'],
   proyecto_procesos_uk: [409, 'El proceso ya tiene estado en este proyecto.'],
   permisos_usuario_ambito_ref_uk: [409, 'Ese permiso ya existe.'],

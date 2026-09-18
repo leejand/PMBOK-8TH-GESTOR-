@@ -36,6 +36,8 @@ const E = {
   estadosProceso: ['pendiente', 'iniciado', 'completado', 'omitido'],
   estadosDocumento: ['borrador', 'revision', 'aprobado'],
   rolesMiembro: ['lider', 'po', 'sm', 'equipo', 'ejecutor', 'observador'],
+  /* Un código de invitación nunca da el rol de líder */
+  rolesInvitacion: ['po', 'sm', 'equipo', 'ejecutor', 'observador'],
   estrategiasRiesgo: ['', 'mitigar', 'evitar', 'transferir', 'aceptar', 'escalar', 'explotar', 'mejorar', 'compartir'],
   decisiones: ['pendiente', 'aprobado', 'rechazado', 'diferido'],
   estadosTarea: ['backlog', 'pendiente', 'curso', 'revision', 'hecho'],
@@ -57,7 +59,7 @@ const NOMBRE_NIVEL = { 0: 'sin acceso', 1: 'ejecutar', 2: 'ver', 3: 'editar', 4:
 const usuarios = {
   tabla: 'usuarios',
   campos: [['id', 'id'], ['nombre', 'nombre'], ['correo', 'correo'], ['rol', 'rol'], ['activo', 'activo'],
-    ['debeCambiarClave', 'debe_cambiar_clave'], ...MARCAS],
+    ['debeCambiarClave', 'debe_cambiar_clave'], ['origen', 'origen'], ...MARCAS],
   orden: 't.nombre, t.creado'
 };
 
@@ -306,6 +308,32 @@ const archivos = {
   orden: 't.creado DESC'
 };
 
+/* Códigos con los que un compañero entra al equipo de un proyecto.
+   Solo los ve y los gestiona quien dirige el proyecto. */
+const RE_CODIGO = /^[A-HJ-NP-Z2-9]{8}$/;
+/* Acepta «abcd-2345» o «ABCD 2345»: se quitan separadores y se pasa a mayúsculas */
+const codigoInvitacion = z.string().max(40)
+  .transform((s) => s.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+  .refine((s) => RE_CODIGO.test(s), 'El código tiene 8 letras y números, por ejemplo ABCD-2345');
+
+const invitaciones = {
+  tabla: 'invitaciones',
+  campos: [...DE_PROYECTO, ['codigo', 'codigo'], ['rol', 'rol'], ['expira', 'expira'], ['usos', 'usos'],
+    ['creadoPor', 'creado_por'], ...MARCAS],
+  orden: 't.creado DESC',
+  esquemas: {
+    crear: z.object({
+      id: v.id.optional(),
+      codigo: codigoInvitacion.optional(),
+      rol: z.enum(E.rolesInvitacion).optional(),
+      /* Días de validez; sin ellos, el código no caduca */
+      dias: z.preprocess((x) => (x === '' ? null : x),
+        v.entero.refine((n) => n >= 1 && n <= 365, 'Entre 1 y 365 días').nullable()).optional(),
+      creado
+    })
+  }
+};
+
 /* ══════════════ EOS ══════════════ */
 
 const rocas = {
@@ -347,8 +375,8 @@ const asientos = {
 };
 
 module.exports = {
-  E, NIVELES, NOMBRE_NIVEL, correo, clave,
+  E, NIVELES, NOMBRE_NIVEL, correo, clave, codigoInvitacion,
   usuarios, permisos, portafolios, programas, proyectos,
   miembros, riesgos, interesados, cambios, lecciones, sprints, tareas, mediciones, comentarios,
-  procesosProyecto, documentos, versiones, archivos, rocas, metricas, asientos
+  procesosProyecto, documentos, versiones, archivos, invitaciones, rocas, metricas, asientos
 };

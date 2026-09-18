@@ -17,7 +17,8 @@ describe('HU-01 Acceso y sesiones', () => {
     assert.equal(r.estado, 200);
     assert.equal(r.datos.bd, 'conectada');
     assert.equal(r.datos.base, 'pmbok8_test');
-    assert.match(r.datos.postgres, /^PostgreSQL 17/);
+    /* El backend admite PostgreSQL 15 o superior */
+    assert.match(r.datos.postgres, /^PostgreSQL (1[5-9]|[2-9]\d)(\.|$)/);
     assert.equal(r.datos.catalogo.procesos, 40);
     assert.equal(r.datos.catalogo.artefactos, 42);
   });

@@ -69,17 +69,55 @@ async function entrar(correo, clave, { ip, agente } = {}) {
     throw new ErrorHttp(403, 'La cuenta está desactivada. Pide a un administrador que la reactive.', 'CUENTA_DESACTIVADA');
   }
   intentos.delete(k);
+  return abrirSesion(fila, { ip, agente });
+}
 
+async function abrirSesion(fila, { ip, agente } = {}, cx) {
   const expira = new Date(Date.now() + config.jwt.expiraHoras * 3600 * 1000);
   const sesion = await db.uno(
     'INSERT INTO sesiones (usuario_id, expira, ip, agente) VALUES ($1, $2, $3, $4) RETURNING id',
-    [fila.id, expira, ip || null, agente ? String(agente).slice(0, 300) : null]);
+    [fila.id, expira, ip || null, agente ? String(agente).slice(0, 300) : null], cx);
 
   const token = jwt.sign({ sid: sesion.id }, config.jwt.secreto, {
     algorithm: 'HS256', subject: fila.id, expiresIn: config.jwt.expiraHoras * 3600
   });
 
   return { token, expira: expira.getTime(), usuario: perfil(fila) };
+}
+
+/* ── Registro propio ──
+   La cuenta nace activa, con la contraseña que eligió su dueño y con el
+   rol de REGISTRO_ROL (director por defecto: crea su proyecto y forma su
+   equipo). El rol nunca lo elige quien se registra, y nunca es «admin». */
+const altas = new Map();
+
+function comprobarAltas(ip) {
+  const clave = String(ip || '');
+  const r = altas.get(clave);
+  if (r && Date.now() - r.desde > 3600 * 1000) altas.delete(clave);
+  const vigente = altas.get(clave);
+  if (vigente && vigente.n >= config.registro.porHora) {
+    throw new ErrorHttp(429, 'Se han creado demasiadas cuentas desde este equipo. Espera una hora o pide la cuenta a un administrador.', 'DEMASIADOS_REGISTROS');
+  }
+}
+
+async function registrar({ nombre, correo, clave }, { ip, agente } = {}) {
+  if (!config.registro.abierto) {
+    throw new ErrorHttp(403, 'El registro está cerrado. Pide una cuenta a un administrador.', 'REGISTRO_CERRADO');
+  }
+  comprobarAltas(ip);
+  const hash = await hashear(clave);
+  const resultado = await db.transaccion(async (cx) => {
+    const fila = await db.uno(
+      `INSERT INTO usuarios (nombre, correo, clave_hash, rol, debe_cambiar_clave, origen)
+       VALUES ($1, $2, $3, $4, false, 'registro') RETURNING *`,
+      [nombre || correo.split('@')[0], correo, hash, config.registro.rol], cx);
+    return abrirSesion(fila, { ip, agente }, cx);
+  });
+  const r = altas.get(String(ip || '')) || { n: 0, desde: Date.now() };
+  r.n++;
+  altas.set(String(ip || ''), r);
+  return resultado;
 }
 
 /* Devuelve { usuario, sesionId } o lanza 401 */
@@ -201,9 +239,10 @@ async function purgar(cx) {
 
 function reiniciarLimites() {
   intentos.clear();
+  altas.clear();
 }
 
 module.exports = {
-  entrar, verificar, salir, revocarDe, cambiarPropiaClave, hashear, purgar, reiniciarLimites,
+  entrar, registrar, verificar, salir, revocarDe, cambiarPropiaClave, hashear, purgar, reiniciarLimites,
   regenerarCodigo, recuperar, normalizarCodigo
 };

@@ -16,6 +16,7 @@ const docs = require('../servicios/documentos');
 const alcance = require('../servicios/alcance');
 const catalogo = require('../catalogo');
 const concurrencia = require('../concurrencia');
+const invitaciones = require('../servicios/invitaciones');
 const { z, validar, limpiar, id: esquemaId } = require('../validacion');
 const { exigirProyecto, requerirGestion } = require('../middleware/auth');
 const { recursoDeProyecto, proyectoDeRegistro } = require('./recursos');
@@ -200,6 +201,21 @@ r.post(P + '/archivos',
     res.status(201).json(archivo);
   });
 
+/* ══════════════ Invitaciones al equipo ══════════════ */
+/* Los códigos son del líder: ni verlos ni crearlos con menos de «dirigir» */
+
+r.get(P + '/invitaciones', async (req, res) => {
+  await exigirProyecto(req.usuario, req.params.proyectoId, 'dirigir');
+  res.json(await invitaciones.listar(req.params.proyectoId));
+});
+
+r.post(P + '/invitaciones', async (req, res) => {
+  const pid = req.params.proyectoId;
+  await exigirProyecto(req.usuario, pid, 'dirigir');
+  const datos = validar(D.invitaciones.esquemas.crear, req.body);
+  res.status(201).json(await invitaciones.crear(req.usuario, pid, datos));
+});
+
 /* ══════════════ Registros de dominio y trabajo ══════════════ */
 
 const conSeveridad = (x) => ({ ...x, severidad: svc.severidad(x.p, x.i) });
@@ -378,6 +394,21 @@ planas.get('/archivos/:id/contenido', async (req, res) => {
 planas.delete('/archivos/:id', async (req, res) => {
   await proyectoDeRegistro('archivos', req.params.id, req.usuario, 'editar');
   await repo.borrar(D.archivos, req.params.id);
+  res.status(204).end();
+});
+
+/* Invitaciones: unirse con un código (cualquier sesión) y retirar un código */
+const esquemaUnirse = z.object({ codigo: D.codigoInvitacion });
+
+planas.post('/invitaciones/unirse', async (req, res) => {
+  const { codigo } = validar(esquemaUnirse, req.body);
+  const r = await invitaciones.unirse(req.usuario, codigo);
+  res.status(r.yaEraMiembro ? 200 : 201).json(r);
+});
+
+planas.delete('/invitaciones/:id', async (req, res) => {
+  await proyectoDeRegistro('invitaciones', req.params.id, req.usuario, 'dirigir');
+  await repo.borrar(D.invitaciones, req.params.id);
   res.status(204).end();
 });
 

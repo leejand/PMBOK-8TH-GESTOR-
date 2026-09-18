@@ -1394,14 +1394,8 @@ window.VistasObra = (function () {
     var puede = Gestor.puede(p.id, 'dirigir');
     var met = Gestor.metodologia(p.metodologia);
 
-    var ROLES_PROYECTO = [
-      { id: 'lider', nombre: 'Líder de proyecto', alcance: 'Dirige: configuración, metodología, fases y equipo.' },
-      { id: 'po', nombre: 'Product Owner', alcance: 'Edita el proyecto: procesos, documentos, backlog y registros.' },
-      { id: 'sm', nombre: 'Scrum Master', alcance: 'Edita el proyecto, igual que el Product Owner.' },
-      { id: 'equipo', nombre: 'Equipo de desarrollo', alcance: 'Edita el proyecto, igual que el Product Owner.' },
-      { id: 'observador', nombre: 'Observador', alcance: 'Ve todo el proyecto y comenta; no cambia nada.' },
-      { id: 'ejecutor', nombre: 'Ejecutor', alcance: 'Ve y mueve solo sus tareas y conversa; no ve los planes.' }
-    ];
+    var ROLES_PROYECTO = Gestor.rolesProyecto;
+    var QUE_PUEDE = { dirigir: 'dirige', editar: 'edita', ver: 'solo ve', ejecutar: 'mueve sus tareas' };
 
     var listaMiembros = miembros.map(function (m) {
       var u = Gestor.uno('usuarios', m.usuarioId);
@@ -1434,17 +1428,27 @@ window.VistasObra = (function () {
 
     return '<h2>Miembros del equipo <span class="pa-conteo">' + miembros.length + '</span></h2>' +
       '<div class="g-miembros">' + listaMiembros + '</div>' +
-      (puede && candidatos.length
+      '<p class="g-roles-nivel">' + ROLES_PROYECTO.map(function (r) {
+        return '<span><b>' + R.escapar(r.nombre) + '</b> ' + QUE_PUEDE[r.nivel] + '</span>';
+      }).join('') + '</p>' +
+      (puede
         ? '<div class="pa-panel">' +
           UI.fila([
-            UI.selector('nmb-usuario', 'Añadir persona', candidatos.map(function (u) {
-              return { id: u.id, nombre: u.nombre + ' · ' + u.correo }; }), candidatos[0].id),
+            UI.texto('nmb-correo', 'Añadir compañero por correo', '', {
+              tipo: 'email', placeholder: 'compañero@correo.com', lista: 'nmb-sugerencias',
+              ayuda: 'Debe haber creado su cuenta. Escribe para ver sugerencias.'
+            }),
             UI.selector('nmb-rol', 'Rol en el proyecto', ROLES_PROYECTO, 'equipo')
           ]) +
-          '<div class="tarjeta-pie"><button class="btn primario" data-o="agregar-miembro">Agregar miembro</button></div>' +
+          '<datalist id="nmb-sugerencias">' + candidatos.map(function (u) {
+            return '<option value="' + R.escapar(u.correo) + '">' + R.escapar(u.nombre) + '</option>';
+          }).join('') + '</datalist>' +
+          '<div id="nmb-error"></div>' +
+          '<div class="tarjeta-pie"><button class="btn primario" data-o="agregar-miembro">Agregar miembro</button>' +
+          '<span class="pa-aviso-inline">Quien aún no tenga cuenta puede crearla y entrar con un código de invitación.</span></div>' +
           '</div>'
-        : (puede ? '<p style="color:var(--tinta-3);font-size:13.2px">Todas las cuentas activas ya son miembros. ' +
-            'Crea más desde <a class="ref" href="#/admin">Administración</a>.</p>' : '')) +
+        : '') +
+      (puede ? panelInvitaciones(p) : '') +
       '<details class="g-adaptacion"><summary><span>Roles</span> Qué puede hacer cada rol en el equipo</summary>' +
         R.tabla(['Rol', 'Alcance'], ROLES_PROYECTO.map(function (r) { return [r.nombre, r.alcance]; })) +
         '<p>Una cuenta con el rol general <b>Ejecutor</b> se queda en su alcance aunque tenga otro rol aquí.</p>' +
@@ -1491,6 +1495,45 @@ window.VistasObra = (function () {
       (puede
         ? '<div class="tarjeta-pie"><button class="btn" data-o="agregar-fase">+ Añadir fase</button></div>'
         : '');
+  }
+
+  /* Códigos con los que los compañeros entran al equipo. Solo para quien dirige. */
+  function panelInvitaciones(p) {
+    var roles = Gestor.rolesProyecto.filter(function (r) { return r.id !== 'lider'; });
+    var nombreRol = function (id) { return (roles.filter(function (r) { return r.id === id; })[0] || { nombre: id }).nombre; };
+
+    var filas = Gestor.invitacionesDe(p.id).map(function (inv) {
+      var vigente = Gestor.invitacionVigente(inv);
+      return '<div class="g-invitacion' + (vigente ? '' : ' caducada') + '">' +
+        '<code class="g-codigo" aria-label="Código ' + R.escapar(inv.codigo.split('').join(' ')) + '">' +
+          R.escapar(Gestor.codigoLegible(inv.codigo)) + '</code>' +
+        '<div class="g-invitacion-datos">' +
+          '<b>' + R.escapar(nombreRol(inv.rol)) + '</b>' +
+          '<span>' + (inv.expira ? (vigente ? 'Caduca el ' : 'Caducó el ') + UI.fecha(inv.expira) : 'No caduca') +
+          ' · ' + (inv.usos || 0) + ' uso' + (inv.usos === 1 ? '' : 's') + '</span>' +
+        '</div>' +
+        (vigente ? '<button class="pa-mini" data-o="copiar-codigo" data-id="' + inv.id + '">Copiar</button>' : '') +
+        '<button class="g-mini-x" data-o="borrar-invitacion" data-id="' + inv.id + '" title="Retirar el código" ' +
+          'aria-label="Retirar el código">×</button>' +
+        '</div>';
+    }).join('');
+
+    return '<h2>Invitar al equipo</h2>' +
+      '<div class="pa-panel">' +
+        '<p class="g-invitar-ayuda">Genera un código y compártelo con tu grupo. Cada compañero lo escribe en ' +
+          '<b>Panel → Unirme con un código</b> y entra con el rol elegido. Nunca da el rol de líder: ese lo asignas tú en la lista de miembros.</p>' +
+        (filas ? '<div class="g-invitaciones">' + filas + '</div>' : '') +
+        UI.fila([
+          UI.selector('ninv-rol', 'Rol que da el código', roles.map(function (r) {
+            return { id: r.id, nombre: r.nombre + ' (' + { editar: 'edita', ver: 'solo ve' }[r.nivel] + ')' };
+          }), 'equipo'),
+          UI.selector('ninv-dias', 'Validez', [
+            { id: '7', nombre: '7 días' }, { id: '30', nombre: '30 días' }, { id: '', nombre: 'Sin caducidad' }
+          ], '7')
+        ]) +
+        '<div class="tarjeta-pie"><button class="btn primario" data-o="crear-invitacion">' +
+          Iconos.svg('mas') + ' Generar código</button></div>' +
+      '</div>';
   }
 
   /* ══════════════ 11 · CALIDAD DEL PLAN ══════════════ */

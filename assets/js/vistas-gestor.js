@@ -60,6 +60,9 @@ window.VistasGestor = (function () {
           UI.texto('acc-clave', 'Contraseña', '', { tipo: 'password', placeholder: '••••••••' }) +
           '<button class="btn primario g-ancho" data-g="entrar">Entrar ' + Iconos.svg('flecha-der', 'ic-flecha') + '</button>' +
           '<p class="g-olvido"><a class="pa-mini" href="#/recuperar">¿Olvidaste tu contraseña?</a></p>' +
+          (Gestor.registroAbierto()
+            ? '<p class="g-acceso-alterna">¿Es tu primera vez? <a class="ref" href="#/registro">Crear cuenta</a></p>'
+            : '') +
           (cuentaInicial
             ? '<div class="nota"><div class="nota-titulo">Cuenta inicial</div>' +
               '<code>admin@pmbok.local</code> · <code>admin123</code><br>' +
@@ -73,6 +76,43 @@ window.VistasGestor = (function () {
           '<p class="g-modo-datos">' + (servidor
             ? Iconos.svg('check-circulo') + ' Conectado al servidor: los datos se guardan en PostgreSQL.'
             : 'Modo local: los datos se guardan en este navegador.') + '</p>' +
+        '</div>' +
+      '</section>' +
+      '</div>';
+  }
+
+  /* Cuenta propia: cada alumno la crea y después entra al proyecto de su
+     grupo con el código que le da el líder */
+  function registro() {
+    var servidor = Gestor.enServidor();
+    var creaProyectos = Gestor.registroRol() === 'director';
+    var cuerpo = Gestor.registroAbierto()
+      ? '<h2>Crear cuenta</h2>' +
+        '<p class="g-acceso-bajada">' + (creaProyectos
+          ? 'Al terminar entras al Panel: crea tu proyecto y añade a tus compañeros desde <b>Equipo</b>, ' +
+            'o únete al de otro con su <b>código de invitación</b>.'
+          : 'Tu cuenta empieza sin proyectos. Pide al líder de tu grupo que te añada o te dé ' +
+            'su <b>código de invitación</b>.') + '</p>' +
+        '<div id="g-error-registro"></div>' +
+        UI.texto('rg-nombre', 'Nombre y apellido', '', { placeholder: 'Ej.: Laura Díaz' }) +
+        UI.texto('rg-correo', 'Correo electrónico', '', { tipo: 'email', placeholder: 'tu@correo.com' }) +
+        UI.texto('rg-clave', 'Contraseña', '', { tipo: 'password', placeholder: 'mínimo 6 caracteres' }) +
+        UI.texto('rg-repetir', 'Repite la contraseña', '', { tipo: 'password', placeholder: '••••••••' }) +
+        '<button class="btn primario g-ancho" data-g="registrarse">Crear cuenta ' + Iconos.svg('flecha-der', 'ic-flecha') + '</button>' +
+        '<p class="g-acceso-alterna">¿Ya tienes cuenta? <a class="ref" href="#/entrar">Inicia sesión</a></p>' +
+        '<p class="g-modo-datos">' + (servidor
+          ? Iconos.svg('check-circulo') + ' Tu cuenta se guarda en el servidor.'
+          : 'Modo local: la cuenta existe solo en este navegador.') + '</p>'
+      : '<h2>Registro cerrado</h2>' +
+        '<p class="g-acceso-bajada">En este servidor las cuentas las crea un administrador. Pídele la tuya.</p>' +
+        '<a class="btn g-ancho" href="#/entrar">Volver a iniciar sesión</a>';
+
+    return '<div class="g-acceso g-acceso-solo">' +
+      '<section class="g-acceso-formulario">' +
+        '<div class="g-acceso-tarjeta">' +
+          '<div class="g-acceso-marca"><span class="marca-glifo" aria-hidden="true">◆</span>' +
+            '<span>Gestor PMBOK<sup>®</sup> 8</span></div>' +
+          cuerpo +
         '</div>' +
       '</section>' +
       '</div>';
@@ -240,9 +280,12 @@ window.VistasGestor = (function () {
       '<div class="g-cabecera">' +
         '<div><div class="eyebrow">Panel de control</div>' +
         '<h1 class="titulo-pagina" style="margin:0">Hola, ' + R.escapar((u.nombre || '').split(' ')[0]) + '</h1></div>' +
-        (creaProyectos
-          ? '<button class="btn primario" data-g="abrir-nuevo-proyecto">' + Iconos.svg('mas') + ' Nuevo proyecto</button>'
-          : '') +
+        '<div class="g-cabecera-acciones">' +
+          '<button class="btn" data-g="unirse-proyecto">' + Iconos.svg('equipo') + ' Unirme con un código</button>' +
+          (creaProyectos
+            ? '<button class="btn primario" data-g="abrir-nuevo-proyecto">' + Iconos.svg('mas') + ' Nuevo proyecto</button>'
+            : '') +
+        '</div>' +
       '</div>' +
       '<p class="bajada">Ruta sugerida: empieza por <b>Iniciar el proyecto o fase</b> y genera el acta de constitución. ' +
       'Desde ahí, cada proceso te dirá qué necesita y qué documento produce.</p>' +
@@ -258,7 +301,9 @@ window.VistasGestor = (function () {
         ? '<div id="g-nuevo-proyecto"' + (abrirNuevo || !proyectos.length ? '' : ' hidden') + '>' +
           formularioProyecto() + '</div>'
         : (proyectos.length ? '' : UI.vacio('📁', 'Todavía no participas en ningún proyecto',
-            'Crear proyectos es tarea de un director o un administrador. Pídeles que te añadan al equipo o te den acceso.'))) +
+            'Pide al líder de tu grupo el <b>código de invitación</b> y pulsa <b>Unirme con un código</b>. ' +
+            'Si vas a liderar un proyecto, pide a un administrador el rol de director para poder crearlo.',
+            '<button class="btn primario" data-g="unirse-proyecto">' + Iconos.svg('equipo') + ' Unirme con un código</button>'))) +
 
       (proyectos.length ? '<h2>Tus proyectos <span class="pa-conteo">' + proyectos.length + '</span></h2>' + tarjetas : '') +
       '</div>';
@@ -749,7 +794,8 @@ window.VistasGestor = (function () {
       var rol = Gestor.roles.filter(function (r) { return r.id === u.rol; })[0] || { nombre: u.rol };
       return '<tr>' +
         '<td><div class="g-usuario">' + UI.avatar(u.nombre) +
-          '<div><b>' + R.escapar(u.nombre) + '</b><span>' + R.escapar(u.correo) + '</span></div></div></td>' +
+          '<div><b>' + R.escapar(u.nombre) + '</b><span>' + R.escapar(u.correo) +
+          (u.origen === 'registro' ? ' · se registró solo' : '') + '</span></div></div></td>' +
         '<td>' + R.escapar(rol.nombre) + '</td>' +
         '<td>' + permisos.length + ' permiso' + (permisos.length === 1 ? '' : 's') + ' · ' + proyectos + ' dirigido' + (proyectos === 1 ? '' : 's') + '</td>' +
         '<td>' + UI.pastilla(u.activo ? 'activo' : 'inactivo', u.activo ? 'ok' : 'falla') + '</td>' +
@@ -1000,6 +1046,12 @@ window.VistasGestor = (function () {
       var correo = document.getElementById('acc-correo');
       if (correo && !Dialogo.abierto()) (correo.value ? clave : correo).focus();
     }
+    if (vista === 'registro') {
+      var repetirReg = document.getElementById('rg-repetir');
+      if (repetirReg) repetirReg.addEventListener('keydown', function (e) { if (e.key === 'Enter') accionRegistrarse(); });
+      var nombreReg = document.getElementById('rg-nombre');
+      if (nombreReg) nombreReg.focus();
+    }
     if (vista === 'clave') {
       var repetir = document.getElementById('cc-repetir');
       if (repetir) repetir.addEventListener('keydown', function (e) { if (e.key === 'Enter') accionCambiarClave(); });
@@ -1130,6 +1182,42 @@ window.VistasGestor = (function () {
     });
   }
 
+  function accionRegistrarse() {
+    var clave = UI.valorDe('rg-clave');
+    if (clave !== UI.valorDe('rg-repetir')) { error('g-error-registro', 'Las dos contraseñas no coinciden.'); return; }
+    ocupado('[data-g="registrarse"]', true);
+    Promise.resolve(Gestor.registrar({
+      nombre: UI.valorDe('rg-nombre'), correo: UI.valorDe('rg-correo'), clave: clave
+    })).then(function (r) {
+      ocupado('[data-g="registrarse"]', false);
+      if (r.error) { error('g-error-registro', r.error); return; }
+      location.hash = '#/panel';
+      recargar();
+      Dialogo.avisar('Cuenta creada. Te damos la bienvenida, ' + String(r.usuario.nombre || '').split(' ')[0]);
+    });
+  }
+
+  /* Entrar al equipo de un proyecto con el código que da su líder */
+  function accionUnirse() {
+    Dialogo.pedir({
+      titulo: 'Unirme a un proyecto',
+      texto: 'Escribe el código de invitación que te dio el líder de tu grupo.',
+      campos: [{ id: 'codigo', etiqueta: 'Código de invitación', placeholder: 'ABCD-2345' }],
+      confirmar: 'Unirme'
+    }, function (v) {
+      if (!String(v.codigo || '').trim()) return;
+      Promise.resolve(Gestor.unirseConCodigo(v.codigo)).then(function (r) {
+        if (r.error) { Dialogo.avisar(r.error, 'error'); return; }
+        var rol = Gestor.rolesProyecto.filter(function (x) { return x.id === r.rol; })[0];
+        Dialogo.avisar(r.yaEraMiembro
+          ? 'Ya formabas parte de «' + r.proyecto.nombre + '»'
+          : 'Te uniste a «' + r.proyecto.nombre + '» como ' + (rol ? rol.nombre : r.rol));
+        location.hash = '#/proyectos/' + r.proyecto.id;
+        recargar();
+      });
+    });
+  }
+
   function accionCambiarClave() {
     var actual = UI.valorDe('cc-actual');
     var nueva = UI.valorDe('cc-nueva');
@@ -1243,6 +1331,8 @@ window.VistasGestor = (function () {
 
     switch (accion) {
       case 'entrar': accionEntrar(); break;
+      case 'registrarse': accionRegistrarse(); break;
+      case 'unirse-proyecto': accionUnirse(); break;
       case 'cambiar-clave': accionCambiarClave(); break;
       case 'recuperar': accionRecuperar(); break;
       case 'cuenta-clave': accionCuentaClave(); break;
@@ -1560,7 +1650,8 @@ window.VistasGestor = (function () {
   }
 
   return {
-    entrar: entrar, cambiarClave: cambiarClave, recuperar: recuperar, cuenta: cuenta,
+    entrar: entrar, registro: registro, cambiarClave: cambiarClave,
+    recuperar: recuperar, cuenta: cuenta,
     mostrarCodigo: mostrarCodigo, correoRecordado: null,
     panel: panel, portafolios: portafolios, agenda: agenda,
     eos: eos, admin: admin, aprender: aprender,

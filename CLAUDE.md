@@ -23,6 +23,7 @@ npm start                   :: API + interfaz en :3000 (al arrancar migra y siem
 npm run dev                 :: igual, con node --watch
 npm test                    :: pruebas de aceptación de la API (node:test), base pmbok8_test, en serie
 npm run test:e2e            :: Playwright con el Edge instalado (channel msedge), API propia en :3100, base pmbok8_e2e
+npm run humo -- <URL>        :: prueba de humo contra un servidor en marcha (registro, equipo, datos guardados); --limpiar al final
 npm run db:migrar           :: aplica las migraciones pendientes
 npm run db:reiniciar        :: BORRA pmbok8 y la crea de cero
 ```
@@ -52,7 +53,8 @@ Todo el contenido de la guía (procesos con su ITTO, bandas del flujo, plantilla
 ### Backend (`backend/`, Node ≥20, Express 5, CommonJS)
 - `src/servidor.js` migra, siembra y escucha solo en `127.0.0.1`/`::1`. `src/app.js` monta `/api` y además sirve `index.html` y `/assets` desde la raíz del repositorio.
 - `src/definiciones.js` declara cada recurso: tabla, campos (camelCase ⇄ snake_case) y esquemas zod (`crear` / `actualizar`). `src/repositorio.js` es el CRUD genérico. `src/rutas/recursos.js` tiene fábricas (`recursoDeProyecto`, `recursoGlobal`) que generan las rutas estándar de los registros de un proyecto (miembros, riesgos, tareas, sprints…) y de la organización (portafolios, rocas, métricas…). Las operaciones compuestas están en `src/servicios/`.
-- Permisos: nivel efectivo por proyecto de 0 a 3 (sin acceso/ver/editar/dirigir), calculado en SQL con `nivel_en()` y exigido en `middleware/auth.js`. Con nivel 0 se responde **404**, no 403. Un usuario con `debeCambiarClave` recibe `403 CLAVE_PENDIENTE` en todo salvo `/auth/yo`, `/auth/clave` y `/auth/salir`.
+- Permisos: nivel efectivo por proyecto de 0 a 4 (sin acceso/ejecutar/ver/editar/dirigir), calculado en SQL con `nivel_en()` y exigido en `middleware/auth.js`. Con nivel 0 se responde **404**, no 403. Un usuario con `debeCambiarClave` recibe `403 CLAVE_PENDIENTE` en todo salvo `/auth/yo`, `/auth/clave` y `/auth/salir`. El nivel de un miembro sale de su rol (líder 4, observador 2, ejecutor 1, resto 3): la regla está duplicada en `nivel_en()` (migración 003) y en `nivelDeRol()` de `gestor.js`, y deben coincidir.
+- Registro propio e invitaciones: `POST /api/auth/registrar` crea cuentas con el rol de `REGISTRO_ROL` (por defecto `director`, nunca `admin`) y sin proyectos (`REGISTRO_ABIERTO`). El líder añade compañeros por correo en Equipo. El líder (nivel 3) genera códigos en `invitaciones` (nunca con rol `lider`) y cualquier sesión se une con `POST /api/invitaciones/unirse`. Los códigos solo llegan en `/api/estado` para proyectos con nivel 3 y el servidor no los exporta ni importa (en modo local sí van en la base del navegador).
 - `src/servicios/estado.js` construye la fotografía por usuario que carga la interfaz. Su forma tiene que ser idéntica a la base del navegador, porque de ello dependen la exportación e importación (`servicios/datos.js`, formato `pmbok8-gestor`) y «Llevar al servidor».
 - Migraciones: `db/migraciones/NNN_nombre.sql`. Cada una se aplica una sola vez, en orden alfabético, dentro de una transacción, y queda anotada en `schema_migraciones`. Muchas reglas las garantiza la propia base (CHECK, un solo sprint activo por proyecto, clave foránea compuesta tarea→sprint del mismo proyecto, cascadas, disparadores que limpian permisos).
 - Los errores son JSON `{ error, codigo, detalles }` (`src/errores.js`). Las fechas-hora van en milisegundos y las fechas en `AAAA-MM-DD`.
